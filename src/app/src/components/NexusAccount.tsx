@@ -161,7 +161,7 @@ function MyDevices() {
   </details>;
 }
 
-export function NexusAccountPage() {
+export function NexusAccountPage({ foundServers }: { foundServers?: React.ReactNode } = {}) {
   const { t } = useI18n();
   const { account } = useNexusAccount();
   const modeId = useId();
@@ -188,6 +188,7 @@ export function NexusAccountPage() {
     </div>
     <NexusMeshPanel />
     <NexusNetwork advanced={advanced} showCompact={false} />
+    {foundServers}
     </React.Fragment>}
   </div>;
 }
