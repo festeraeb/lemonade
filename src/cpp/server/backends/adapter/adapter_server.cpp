@@ -10,6 +10,8 @@
 #include "lemon/utils/path_utils.h"
 
 #include <cctype>
+#include <csignal>
+#include <cstdio>
 #include <chrono>
 #include <map>
 #include <cstdlib>
@@ -21,6 +23,11 @@
 #include <thread>
 #include <utility>
 #include <vector>
+
+#ifdef __linux__
+#include <sys/types.h>
+#include <signal.h>
+#endif
 
 namespace fs = std::filesystem;
 
@@ -269,6 +276,85 @@ void AdapterServer::load(const std::string& model_name, const ModelInfo& model_i
     throw std::runtime_error(std::string("adapter spec for '") + model_name + "': a field has the wrong type (" +
                              e.what() + ")");
   }
+}
+
+namespace {
+
+#ifdef __linux__
+// The engine's process and every descendant, read from /proc (a launcher script often starts the real server).
+std::vector<int> process_tree(int root) {
+    std::vector<int> out;
+    if (root <= 0) return out;
+    std::vector<int> todo{root};
+    while (!todo.empty()) {
+        const int pid = todo.back();
+        todo.pop_back();
+        out.push_back(pid);
+        std::error_code ec;
+        for (const auto& task : fs::directory_iterator("/proc/" + std::to_string(pid) + "/task", ec)) {
+            std::ifstream children(task.path() / "children");
+            for (int child; children >> child;) todo.push_back(child);
+        }
+    }
+    return out;
+}
+
+// pid -> MiB for every process holding GPU memory, from nvidia-smi and rocm-smi when they are installed.
+std::map<int, long> gpu_holders() {
+    std::map<int, long> out;
+    const auto run = [](const char* cmd) {
+        std::string text;
+        if (FILE* p = popen(cmd, "r")) {
+            char buf[512];
+            while (fgets(buf, sizeof(buf), p)) text += buf;
+            pclose(p);
+        }
+        return text;
+    };
+    std::istringstream nv(run("nvidia-smi --query-compute-apps=pid,used_memory --format=csv,noheader,nounits 2>/dev/null"));
+    for (std::string line; std::getline(nv, line);) {
+        int pid = 0;
+        long mib = 0;
+        if (std::sscanf(line.c_str(), "%d, %ld", &pid, &mib) == 2) out[pid] += mib;
+    }
+    std::istringstream amd(run("rocm-smi --showpids 2>/dev/null"));
+    for (std::string line; std::getline(amd, line);) {
+        int pid = 0;
+        if (std::sscanf(line.c_str(), "%d", &pid) == 1 && pid > 1) out[pid] += 0;   // rocm-smi lists holders, not sizes
+    }
+    return out;
+}
+#endif
+
+}  // namespace
+
+void AdapterServer::unload() {
+#ifdef __linux__
+    const std::vector<int> tree = process_tree(get_process_id());
+#endif
+    stop_server();
+#ifdef __linux__
+    if (tree.empty()) return;
+    // A device frees its memory a moment after the process exits; give it time before calling it a leak.
+    std::map<int, long> held;
+    for (int i = 0; i < 15; ++i) {
+        held.clear();
+        const auto holders = gpu_holders();
+        for (int pid : tree) {
+            if (const auto it = holders.find(pid); it != holders.end()) held[pid] = it->second;
+        }
+        if (held.empty()) {
+            LOG(INFO, "Adapter") << spec_name_ << ": unloaded, device memory released (checked on the GPU)" << std::endl;
+            return;
+        }
+        std::this_thread::sleep_for(std::chrono::seconds(1));
+    }
+    for (const auto& [pid, mib] : held) {
+        LOG(WARNING, "Adapter") << spec_name_ << ": engine reported stopped but pid " << pid << " still holds "
+                                << mib << " MiB on a GPU; stopping it" << std::endl;
+        ::kill(pid, SIGKILL);
+    }
+#endif
 }
 
 json AdapterServer::chat_completion(const json& request) {

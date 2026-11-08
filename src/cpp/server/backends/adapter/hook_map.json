@@ -259,6 +259,22 @@
       "kind": "decl",
       "used_for": "the <stem>.h / <stem>_server.h / create, spec, ops, capabilities naming the adapter backend follows",
       "fingerprint": "5629c327b3ae58c8"
+    },
+    {
+      "id": "wrapped-unload",
+      "file": "src/cpp/include/lemon/wrapped_server.h",
+      "anchor": "^\\s*virtual void unload\\(",
+      "kind": "decl",
+      "used_for": "AdapterServer::unload overrides it: stop the engine, then check the GPUs for leftovers",
+      "fingerprint": "43611117627e094d"
+    },
+    {
+      "id": "process-id",
+      "file": "src/cpp/include/lemon/wrapped_server.h",
+      "anchor": "^\\s*int get_process_id\\(",
+      "kind": "decl",
+      "used_for": "the engine's root pid, to collect its process tree before stopping it (verified unload)",
+      "fingerprint": "5e916774acbb0dc9"
     }
   ]
 }

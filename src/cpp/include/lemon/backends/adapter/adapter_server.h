@@ -24,6 +24,11 @@ public:
     void load(const std::string& model_name, const ModelInfo& model_info,
               const RecipeOptions& options, bool do_not_upgrade = false) override;
 
+    // Stops the engine, then checks the GPUs rather than the engine's word: a process of the engine's
+    // tree that still holds device memory is stopped, and the mismatch is logged (one adapter that does
+    // not really unload must not break eviction for every other model).
+    void unload() override;
+
     json chat_completion(const json& request) override;
     json completion(const json& request) override;
 
