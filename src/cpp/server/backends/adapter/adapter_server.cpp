@@ -1,0 +1,351 @@
+#include "lemon/backends/adapter/adapter_server.h"
+
+#include "lemon/backends/adapter/adapter.h"
+#include "lemon/backends/backend_ops.h"
+#include "lemon/backends/backend_registry.h"
+#include "lemon/backends/backend_utils.h"
+#include "lemon/server_process.h"
+#include "lemon/utils/aixlog.hpp"
+#include "lemon/utils/http_client.h"
+#include "lemon/utils/path_utils.h"
+
+#include <cctype>
+#include <chrono>
+#include <map>
+#include <cstdlib>
+#include <filesystem>
+#include <fstream>
+#include <sstream>
+#include <stdexcept>
+#include <string>
+#include <thread>
+#include <utility>
+#include <vector>
+
+namespace fs = std::filesystem;
+
+namespace lemon {
+namespace backends {
+
+namespace adapter {
+
+std::pair<std::string, std::string> split_checkpoint(const std::string& checkpoint) {
+    const auto at = checkpoint.find("::");
+    if (at == std::string::npos) {
+        return {"", checkpoint};
+    }
+    return {checkpoint.substr(0, at), checkpoint.substr(at + 2)};
+}
+
+std::string adapters_dir() {
+    if (const char* dir = std::getenv("LEMONADE_ADAPTERS_DIR"); dir != nullptr && *dir != '\0') {
+        return dir;
+    }
+    return (fs::path(utils::get_config_dir()) / "adapters").string();
+}
+
+}  // namespace adapter
+
+namespace {
+
+// The newest spec schema this backend reads. A newer spec is refused (run the engine without control instead).
+constexpr int kSpecVersion = 1;
+
+// A spec name is a file stem in the adapters folder: no separators, no "..".
+bool valid_spec_name(const std::string& name) {
+    if (name.empty() || name.size() > 64) return false;
+    for (char c : name) {
+        if (!(std::isalnum(static_cast<unsigned char>(c)) || c == '-' || c == '_' || c == '.')) return false;
+    }
+    return name.find("..") == std::string::npos;
+}
+
+json read_spec(const std::string& name, fs::path& spec_dir) {
+    if (!valid_spec_name(name)) {
+        throw std::runtime_error("adapter: '" + name + "' is not a valid spec name (letters, digits, - _ .)");
+    }
+    const fs::path path = fs::path(adapter::adapters_dir()) / (name + ".json");
+    std::ifstream in(path);
+    if (!in) {
+        throw std::runtime_error("adapter: no spec " + path.string() +
+                                 " (install the engine's adapter, or fall back to running the engine without control)");
+    }
+    json spec;
+    try {
+        in >> spec;
+    } catch (const std::exception& e) {
+        throw std::runtime_error("adapter: " + path.string() + " is not valid JSON: " + e.what());
+    }
+    spec_dir = path.parent_path();
+    return spec;
+}
+
+std::string fill(std::string text, const std::map<std::string, std::string>& subs) {
+    for (const auto& [key, value] : subs) {
+        for (size_t at = text.find(key); at != std::string::npos; at = text.find(key, at + value.size())) {
+            text.replace(at, key.size(), value);
+        }
+    }
+    return text;
+}
+
+std::vector<std::string> split_args(const std::string& text) {
+    std::vector<std::string> out;
+    std::istringstream in(text);
+    for (std::string word; in >> word;) {
+        out.push_back(word);
+    }
+    return out;
+}
+
+bool contains(const json& values, const std::string& v) {
+    if (!values.is_array()) return false;
+    for (const auto& x : values) {
+        if (x.is_string() && x.get<std::string>() == v) return true;
+    }
+    return false;
+}
+
+// The engine program: an absolute path, a path relative to the spec's folder, or a name on PATH.
+std::string resolve_binary(const std::string& binary, const fs::path& spec_dir) {
+    if (binary.empty()) {
+        throw std::runtime_error("adapter: the spec names no binary");
+    }
+    const fs::path p(binary);
+    std::error_code ec;
+    if (p.is_absolute()) {
+        if (fs::exists(p, ec)) return p.string();
+        throw std::runtime_error("adapter: engine binary not found: " + binary);
+    }
+    if (binary.find('/') != std::string::npos || binary.find('\\') != std::string::npos) {
+        const fs::path rel = spec_dir / p;
+        if (fs::exists(rel, ec)) return rel.string();
+        throw std::runtime_error("adapter: engine binary not found: " + rel.string());
+    }
+    if (!utils::find_executable_in_path(binary).empty()) return binary;
+    throw std::runtime_error("adapter: engine binary '" + binary + "' is not on PATH");
+}
+
+// A recipe option as text: "" when unset (an unset option is JSON null).
+std::string option_text(const RecipeOptions& options, const std::string& key) {
+    const json v = options.get_option(key);
+    if (v.is_string()) return v.get<std::string>();
+    if (v.is_number()) return v.dump();
+    return "";
+}
+
+}  // namespace
+
+InstallParams AdapterServer::get_install_params(const std::string& /*backend*/, const std::string& /*version*/) {
+    return {};  // engines are installed by their adapter (e.g. the Lemonade Stand), never by lemond
+}
+
+AdapterServer::AdapterServer(const std::string& log_level, ModelManager* model_manager,
+                             BackendManager* backend_manager)
+    : WrappedServer("adapter", log_level, model_manager, backend_manager) {}
+
+void AdapterServer::load(const std::string& model_name, const ModelInfo& model_info,
+                         const RecipeOptions& options, bool /*do_not_upgrade*/) {
+  try {
+    const auto [name, model_path] = adapter::split_checkpoint(model_info.checkpoint());
+    if (name.empty()) {
+        throw std::runtime_error("adapter model '" + model_name + "' has no spec: write its checkpoint as "
+                                 "\"<spec>::<model path>\"");
+    }
+    fs::path spec_dir;
+    const json spec = read_spec(name, spec_dir);
+    spec_name_ = name;
+    const int version = spec.value("spec_version", 1);
+    if (version > kSpecVersion) {
+        throw std::runtime_error("adapter " + name + ": spec_version " + std::to_string(version) +
+                                 " is newer than this Lemonade reads (" + std::to_string(kSpecVersion) +
+                                 "); update Lemonade or run the engine without control");
+    }
+
+    const json ready = spec.value("ready", json::object());
+    const std::string ready_path = ready.value("path", std::string("/v1/models"));
+    const long ready_timeout = ready.value("timeout_s", 600L);
+    const std::string ready_field = ready.value("json_field", std::string{});
+    const json ready_values = ready.value("ready_values", json::array());
+    const json error_values = ready.value("error_values", json::array());
+    const std::string owned_by = spec.value("identity", json::object()).value("owned_by", std::string{});
+    completion_ = spec.value("completion", true);
+    telemetry_path_ = spec.value("telemetry_path", std::string{});
+
+    std::string device = option_text(options, "adapter_device");
+    if (device.empty()) device = spec.value("default_device_index", std::string("0"));
+
+    port_ = choose_port();
+    if (port_ == 0) {
+        throw std::runtime_error("adapter: failed to allocate a port for " + name);
+    }
+    const std::map<std::string, std::string> subs = {
+        {"{model}", model_path}, {"{model_path}", model_path}, {"{port}", std::to_string(port_)}, {"{device}", device},
+        {"{spec_dir}", spec_dir.string()}};
+
+    std::vector<std::string> args;
+    const std::string override_args = option_text(options, "adapter_args");
+    if (!override_args.empty()) {
+        args = split_args(fill(override_args, subs));
+    } else if (spec.contains("args") && spec["args"].is_array()) {
+        for (const auto& a : spec["args"]) args.push_back(fill(a.get<std::string>(), subs));
+    } else {
+        args = split_args(fill(spec.value("args_template", std::string{}), subs));
+    }
+
+    ServerCommand command;
+    command.program = resolve_binary(fill(spec.value("binary", std::string{}), subs), spec_dir);
+    command.args = std::move(args);
+    const json env = spec.value("env", json::object());   // a named copy: items() must not outlive it
+    for (const auto& [k, v] : env.items()) {
+        command.env.emplace_back(k, fill(v.get<std::string>(), subs));
+    }
+    // Opt-in telemetry is declared in the spec, never hidden in its arguments: its env applies only when the
+    // spec enables it or the user sets adapter_telemetry=on for this model.
+    const json telemetry = spec.value("telemetry", json::object());
+    if (telemetry.value("enabled", false) || option_text(options, "adapter_telemetry") == "on") {
+        const json tenv = telemetry.value("env", json::object());
+        for (const auto& [k, v] : tenv.items()) {
+            command.env.emplace_back(k, fill(v.get<std::string>(), subs));
+        }
+        LOG(INFO, "Adapter") << name << ": telemetry on (" << telemetry.value("what", std::string("declared in the spec")) << ")" << std::endl;
+    }
+    // A catalogue can pin exactly which program runs.
+    const std::string want_sha = spec.value("binary_sha256", std::string{});
+    if (!want_sha.empty()) {
+        std::string full = command.program;
+        if (!fs::path(full).is_absolute()) full = utils::find_executable_in_path(full);
+        std::string digest_error;
+        if (full.empty() || !utils::HttpClient::verify_file_digest(full, "sha256", want_sha, digest_error)) {
+            throw std::runtime_error("adapter " + name + ": " + command.program +
+                                     " does not match the spec's binary_sha256 (" + digest_error + ")");
+        }
+    }
+    command.port = port_;
+    command.ready_endpoint = ready_path;
+
+    LOG(INFO, "Adapter") << "Starting " << name << " (" << command.program << ") for " << model_path
+                         << " on port " << port_ << " (device " << device << ")" << std::endl;
+    const bool inherit_output = (log_level_ == "info") || (log_level_ == "debug");
+    start_server(std::make_unique<NativeProcess>(ProcessOutput{inherit_output, true}), command, ready_timeout);
+
+    // A health route can answer before the engine is ready (e.g. while weights load).
+    if (!ready_field.empty()) {
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(ready_timeout);
+        std::string last;
+        while (true) {
+            try {
+                last = forward_get_request(ready_path, 5).value(ready_field, std::string{});
+            } catch (...) {
+                last = "";
+            }
+            if (contains(ready_values, last)) break;
+            if (contains(error_values, last) || std::chrono::steady_clock::now() > deadline) {
+                stop_server();
+                throw std::runtime_error("adapter " + name + ": engine did not become ready (" + ready_field +
+                                         "=\"" + last + "\")");
+            }
+            std::this_thread::sleep_for(std::chrono::seconds(2));
+        }
+    }
+
+    // Refuse a mislabelled engine when the spec names its owner.
+    if (!owned_by.empty()) {
+        bool identified = false;
+        try {
+            for (const auto& m : forward_get_request("/v1/models", 10).value("data", json::array())) {
+                if (m.value("owned_by", std::string{}) == owned_by) identified = true;
+            }
+        } catch (...) {
+        }
+        if (!identified) {
+            stop_server();
+            throw std::runtime_error("adapter " + name + ": /v1/models does not report owned_by=" + owned_by +
+                                     "; refusing a mislabelled engine");
+        }
+    }
+    LOG(INFO, "Adapter") << name << " ready on port " << port_ << std::endl;
+  } catch (const nlohmann::json::exception& e) {
+    throw std::runtime_error(std::string("adapter spec for '") + model_name + "': a field has the wrong type (" +
+                             e.what() + ")");
+  }
+}
+
+json AdapterServer::chat_completion(const json& request) {
+    return forward_request("/v1/chat/completions", request);
+}
+
+json AdapterServer::completion(const json& request) {
+    if (!completion_) {
+        throw std::runtime_error("adapter " + spec_name_ + ": this engine has no /v1/completions");
+    }
+    return forward_request("/v1/completions", request);
+}
+
+std::map<std::string, nlohmann::json> AdapterServer::get_additional_telemetry() {
+    if (get_backend_port() <= 0 || telemetry_path_.empty()) return {};
+    std::map<std::string, nlohmann::json> out;
+    try {
+        out["adapter_stats"] = forward_get_request(telemetry_path_, 2);
+    } catch (...) {
+        out["adapter_stats"] = nullptr;
+    }
+    return out;
+}
+
+std::string AdapterServer::get_additional_telemetry_url() const {
+    if (get_backend_port() <= 0 || telemetry_path_.empty()) return "";
+    return get_base_url() + telemetry_path_;
+}
+
+}  // namespace backends
+}  // namespace lemon
+
+namespace lemon {
+namespace backends {
+namespace adapter {
+
+namespace {
+// The model is a local path ("<spec>::<path>") the engine reads itself: "downloaded" means it exists
+// here and its spec is installed. Nothing is fetched by lemond.
+class AdapterOps : public BackendOps {
+public:
+    std::string resolve_checkpoint_path(const ModelInfo& info,
+                                        const CheckpointResolveContext& /*ctx*/) const override {
+        return split_checkpoint(info.checkpoint()).second;
+    }
+    bool is_downloaded(const ModelInfo& info, const BackendOpsContext& /*ctx*/) const override {
+        const auto [name, path] = split_checkpoint(info.checkpoint());
+        std::error_code ec;
+        return !name.empty() && fs::exists(fs::path(path), ec) &&
+               fs::exists(fs::path(adapters_dir()) / (name + ".json"), ec);
+    }
+    void download_model(const ModelInfo& info, bool /*do_not_upgrade*/, DownloadProgressCallback /*progress*/,
+                        const BackendOpsContext& ctx) const override {
+        if (is_downloaded(info, ctx)) return;
+        const auto [name, path] = split_checkpoint(info.checkpoint());
+        if (name.empty()) {
+            throw std::runtime_error("adapter checkpoints are \"<spec>::<model path>\"; got '" + info.checkpoint() + "'");
+        }
+        throw std::runtime_error("adapter " + name + ": '" + path + "' or the spec " +
+                                 (fs::path(adapters_dir()) / (name + ".json")).string() + " is missing on this machine");
+    }
+};
+}  // namespace
+
+std::unique_ptr<WrappedServer> create(const BackendContext& ctx) {
+    return make_server<AdapterServer>(ctx);
+}
+
+const BackendSpec* spec() {
+    return make_spec<AdapterServer>(descriptor);
+}
+
+const BackendOps* ops() {
+    static const AdapterOps kOps;
+    return &kOps;
+}
+
+}  // namespace adapter
+}  // namespace backends
+}  // namespace lemon
