@@ -76,6 +76,11 @@ using RequestCancelToken = CancelToken;
 // Progress callback returns bool: true = continue, false = cancel download
 using ProgressCallback = std::function<bool(size_t downloaded, size_t total)>;
 using StreamCallback = std::function<bool(const char* data, size_t length)>;
+// Supplies a request body as the transfer needs it: copies up to `capacity` bytes into
+// `buffer` and returns how many, 0 at the end of the body. Returning BodySourceAbort
+// stops the request.
+using BodySource = std::function<size_t(char* buffer, size_t capacity)>;
+inline constexpr size_t BodySourceAbort = static_cast<size_t>(-1);
 
 // Download configuration options
 struct DownloadOptions {
@@ -175,6 +180,21 @@ public:
         std::function<bool()> should_cancel = nullptr,
         std::map<std::string, std::string>* out_response_headers = nullptr);
 
+    // post_stream with a body that is read while it is sent instead of held in memory.
+    // body_size is the length the source will supply, or -1 when it is not known (the
+    // body is then sent with chunked transfer encoding).
+    static HttpResponse post_stream(
+        const std::string& url,
+        BodySource body_source,
+        int64_t body_size,
+        StreamCallback stream_callback,
+        const std::map<std::string, std::string>& headers = {},
+        long timeout_seconds = 300,
+        std::function<void(int status_code)> on_status = nullptr,
+        HttpSecurityPolicy policy = HttpSecurityPolicy::ExternalHttpsOnly,
+        std::function<bool()> should_cancel = nullptr,
+        std::map<std::string, std::string>* out_response_headers = nullptr);
+
     // Download file to disk with automatic retry and resume support
     // Verifies a file against an expected digest using the same algorithm
     // parsing and digests as download_file, so a transfer that does not go over
@@ -205,6 +225,13 @@ public:
 private:
     static std::atomic<long> default_timeout_seconds_;
     static std::atomic<int64_t> download_rate_limit_bytes_per_second_;
+
+    // Both post_stream forms: the body is `body` when it is set, otherwise body_source.
+    static HttpResponse post_stream(const std::string& url, BodySource body_source, int64_t body_size,
+                                    StreamCallback stream_callback, const std::map<std::string, std::string>& headers,
+                                    long timeout_seconds, std::function<void(int status_code)> on_status,
+                                    HttpSecurityPolicy policy, std::function<bool()> should_cancel,
+                                    std::map<std::string, std::string>* out_response_headers, const std::string* body);
 
     // Single download attempt, may resume from offset
     static DownloadResult download_attempt(const std::string& url,

@@ -973,6 +973,45 @@ HttpResponse HttpClient::post_stream(const std::string& url,
                                      HttpSecurityPolicy policy,
                                      std::function<bool()> should_cancel,
                                      std::map<std::string, std::string>* out_response_headers) {
+    return post_stream(url, BodySource{}, 0, std::move(stream_callback), headers, timeout_seconds,
+                       std::move(on_status), policy, std::move(should_cancel), out_response_headers, &body);
+}
+
+static size_t body_source_read_callback(char* buffer, size_t size, size_t nitems, void* userdata) {
+    auto* source = static_cast<BodySource*>(userdata);
+    try {
+        const auto copied = (*source)(buffer, size * nitems);
+        return copied == BodySourceAbort ? CURL_READFUNC_ABORT : copied;
+    } catch (...) {
+        return CURL_READFUNC_ABORT;
+    }
+}
+
+HttpResponse HttpClient::post_stream(const std::string& url,
+                                     BodySource body_source,
+                                     int64_t body_size,
+                                     StreamCallback stream_callback,
+                                     const std::map<std::string, std::string>& headers,
+                                     long timeout_seconds,
+                                     std::function<void(int)> on_status,
+                                     HttpSecurityPolicy policy,
+                                     std::function<bool()> should_cancel,
+                                     std::map<std::string, std::string>* out_response_headers) {
+    return post_stream(url, std::move(body_source), body_size, std::move(stream_callback), headers, timeout_seconds,
+                       std::move(on_status), policy, std::move(should_cancel), out_response_headers, nullptr);
+}
+
+HttpResponse HttpClient::post_stream(const std::string& url,
+                                     BodySource body_source,
+                                     int64_t body_size,
+                                     StreamCallback stream_callback,
+                                     const std::map<std::string, std::string>& headers,
+                                     long timeout_seconds,
+                                     std::function<void(int)> on_status,
+                                     HttpSecurityPolicy policy,
+                                     std::function<bool()> should_cancel,
+                                     std::map<std::string, std::string>* out_response_headers,
+                                     const std::string* body) {
     CURL* curl = curl_easy_init();
     if (!curl) {
         throw std::runtime_error("Failed to initialize CURL");
@@ -988,8 +1027,16 @@ HttpResponse HttpClient::post_stream(const std::string& url,
     callback_data.on_status = &on_status;
 
     curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
-    curl_easy_setopt(curl, CURLOPT_POSTFIELDS, body.data());
-    curl_easy_setopt(curl, CURLOPT_POSTFIELDSIZE_LARGE, static_cast<curl_off_t>(body.size()));
+    if (body) {
+        curl_easy_setopt(curl, CURLOPT_POSTFIELDS, body->data());
+        curl_easy_setopt(curl, CURLOPT_POSTFIELDSIZE_LARGE, static_cast<curl_off_t>(body->size()));
+    } else {
+        // The body is read as it is sent; an unknown size goes out chunked.
+        curl_easy_setopt(curl, CURLOPT_POST, 1L);
+        curl_easy_setopt(curl, CURLOPT_READFUNCTION, body_source_read_callback);
+        curl_easy_setopt(curl, CURLOPT_READDATA, &body_source);
+        curl_easy_setopt(curl, CURLOPT_POSTFIELDSIZE_LARGE, static_cast<curl_off_t>(body_size));
+    }
     curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, stream_write_callback);
     curl_easy_setopt(curl, CURLOPT_WRITEDATA, &callback_data);
     if (out_response_headers) {

@@ -163,7 +163,29 @@ class RelayStream {
 public:
     ~RelayStream() { abandon(); }
     void start(const std::string& url, const std::string& body, const std::map<std::string, std::string>& headers) {
-        worker_ = std::thread([this, url, body, headers] { run(url, body, headers); });
+        worker_ = std::thread([this, url, body, headers] { run(url, &body, -1, headers); });
+    }
+    // Starts the request with a body the route handler supplies through feed() and
+    // end_body() while the peer receives it; body_size is -1 when it is not known.
+    void start_streamed(const std::string& url, int64_t body_size, const std::map<std::string, std::string>& headers) {
+        worker_ = std::thread([this, url, body_size, headers] { run(url, nullptr, body_size, headers); });
+    }
+    // Queues body bytes for the peer, waiting while kMaxBodyQueue bytes are already
+    // queued, so a slow peer slows the sender instead of filling memory. False once
+    // the request ended (the peer answered or failed): the rest of the body is unwanted.
+    bool feed(const char* data, size_t length) {
+        std::unique_lock<std::mutex> lock(mutex_);
+        ready_.wait(lock, [&] { return body_.size() - body_sent_ < kMaxBodyQueue || finished_ || client_gone_; });
+        if (finished_ || client_gone_) return false;
+        if (body_sent_ > 0 && body_sent_ == body_.size()) { body_.clear(); body_sent_ = 0; }
+        body_.append(data, length);
+        ready_.notify_all();
+        return true;
+    }
+    // The body is complete, or (complete == false) the client stopped sending it.
+    void end_body(bool complete) {
+        { std::lock_guard<std::mutex> lock(mutex_); body_ended_ = true; body_complete_ = complete; }
+        ready_.notify_all();
     }
     // Blocks until the peer answered or the request failed. Returns the peer's status,
     // or 0 when no answer arrived; `reply` then holds the body of a non-2xx answer.
@@ -186,16 +208,21 @@ public:
         std::string next;
         std::string failure;
         bool finished = false;
+        bool event_stream = false;
         {
             std::unique_lock<std::mutex> lock(mutex_);
             ready_.wait(lock, [&] { return !chunk_.empty() || finished_; });
             next.swap(chunk_);
             finished = finished_;
             failure = failure_;
+            event_stream = content_type_.find("text/event-stream") != std::string::npos;
         }
         ready_.notify_all();
         if (!next.empty() && !sink.write(next.data(), next.size())) { disconnect(); return false; }
         if (!finished) return true;
+        // A broken event stream ends with an error event; any other reply is cut off, so the
+        // client sees an incomplete response instead of a well-formed one with an event in it.
+        if (!failure.empty() && !event_stream) return false;
         if (!failure.empty()) {
             auto payload = ErrorResponse::create(failure, ErrorType::BACKEND_ERROR);
             payload["error"]["status_code"] = 502;
@@ -212,6 +239,18 @@ public:
 
 private:
     static constexpr size_t kMaxErrorBody = 64 * 1024;
+    static constexpr size_t kMaxBodyQueue = 1024 * 1024;
+    // curl's read callback: the next queued body bytes, 0 at the end of the body.
+    size_t take_body(char* buffer, size_t capacity) {
+        std::unique_lock<std::mutex> lock(mutex_);
+        ready_.wait(lock, [&] { return body_sent_ < body_.size() || body_ended_ || client_gone_; });
+        if (client_gone_ || (body_sent_ == body_.size() && !body_complete_)) return utils::BodySourceAbort;
+        const auto count = std::min(capacity, body_.size() - body_sent_);
+        std::memcpy(buffer, body_.data() + body_sent_, count);
+        body_sent_ += count;
+        ready_.notify_all();
+        return count;
+    }
     bool success_locked() const { return status_ >= 200 && status_ < 300; }
     void disconnect() {
         { std::lock_guard<std::mutex> lock(mutex_); client_gone_ = true; }
@@ -240,15 +279,21 @@ private:
         ready_.notify_all();
         return true;
     }
-    void run(const std::string& url, const std::string& body, const std::map<std::string, std::string>& headers) {
+    void run(const std::string& url, const std::string* body, int64_t body_size,
+             const std::map<std::string, std::string>& headers) {
         std::map<std::string, std::string> response_headers;
         std::string failure;
         int status = 0;
         try {
-            const auto result = utils::HttpClient::post_stream(url, body,
-                [this](const char* data, size_t length) { return push(data, length); }, headers, 300,
-                [this, &response_headers](int code) { announce(code, response_headers); },
-                utils::HttpSecurityPolicy::TrustedLoopback, [this] { return client_gone(); }, &response_headers);
+            const auto on_chunk = [this](const char* data, size_t length) { return push(data, length); };
+            const auto on_status = [this, &response_headers](int code) { announce(code, response_headers); };
+            const auto cancelled = [this] { return client_gone(); };
+            const auto result = body
+                ? utils::HttpClient::post_stream(url, *body, on_chunk, headers, 300, on_status,
+                      utils::HttpSecurityPolicy::TrustedLoopback, cancelled, &response_headers)
+                : utils::HttpClient::post_stream(url, [this](char* buffer, size_t capacity) { return take_body(buffer, capacity); },
+                      body_size, on_chunk, headers, 300, on_status, utils::HttpSecurityPolicy::TrustedLoopback, cancelled,
+                      &response_headers);
             status = result.status_code;
             if (result.curl_code != 0) failure = "The device's server closed the stream: " + result.curl_error;
         } catch (const std::exception& e) {
@@ -277,6 +322,10 @@ private:
     std::string chunk_;
     std::string error_body_;
     std::string failure_;
+    std::string body_;
+    size_t body_sent_{0};
+    bool body_ended_{false};
+    bool body_complete_{false};
     bool forwarded_{false};
     bool finished_{false};
     bool client_gone_{false};
@@ -1096,6 +1145,81 @@ void relay_http(uint16_t port, const std::string& path, const httplib::Request& 
     } catch (const std::exception&) {
         reply_error(res, 502, "Cannot reach that device's server through the mesh");
     }
+}
+
+void relay_http_upload(uint16_t port, const std::string& path, const httplib::Request& req, httplib::Response& res,
+                       const std::string& peer_authorization, const httplib::ContentReader& reader) {
+    const bool form = req.is_multipart_form_data();
+    int64_t size = -1;
+    if (req.has_header("Content-Length")) {
+        try { size = std::stoll(req.get_header_value("Content-Length")); } catch (const std::exception&) { size = -1; }
+    }
+    if (!form && size >= 0 && static_cast<size_t>(size) <= kRelayHeldBody) {
+        std::string body;
+        body.reserve(static_cast<size_t>(size));
+        reader([&body](const char* data, size_t length) { body.append(data, length); return true; });
+        relay_http(port, path, req, res, peer_authorization, body);
+        return;
+    }
+    const auto url = "http://127.0.0.1:" + std::to_string(port) + path;
+    std::map<std::string, std::string> headers;
+    if (!peer_authorization.empty()) headers["Authorization"] = peer_authorization;
+    if (req.has_header("X-Client-Session-Id")) headers["X-Client-Session-Id"] = req.get_header_value("X-Client-Session-Id");
+    res.set_header("Cache-Control", "no-store");
+    std::string boundary;
+    if (form) {
+        // httplib parses a form as it reads it, so the parts are written out again as they
+        // arrive, in their order, the way multipart_body writes a held form.
+        std::random_device random;
+        boundary = "lemonade-relay-" + std::to_string(random()) + std::to_string(random()) + std::to_string(random());
+        headers["Content-Type"] = "multipart/form-data; boundary=" + boundary;
+        size = -1;
+    } else {
+        headers["Content-Type"] = req.has_header("Content-Type") ? req.get_header_value("Content-Type") : "application/json";
+    }
+    auto stream = std::make_shared<RelayStream>();
+    stream->start_streamed(url, size, headers);
+    bool complete = false;
+    try {
+        if (form) {
+            bool first = true;
+            complete = reader(
+                [&](const httplib::FormData& part) {
+                    std::string head = std::string(first ? "" : "\r\n") + "--" + boundary +
+                        "\r\nContent-Disposition: form-data; name=\"" + part.name + "\"";
+                    if (!part.filename.empty()) {
+                        head += "; filename=\"" + part.filename + "\"\r\nContent-Type: " +
+                            (part.content_type.empty() ? "application/octet-stream" : part.content_type);
+                    }
+                    head += "\r\n\r\n";
+                    first = false;
+                    return stream->feed(head.data(), head.size());
+                },
+                [&](const char* data, size_t length) { return stream->feed(data, length); });
+            if (complete) {
+                const auto tail = std::string(first ? "" : "\r\n") + "--" + boundary + "--\r\n";
+                complete = stream->feed(tail.data(), tail.size());
+            }
+        } else {
+            complete = reader([&](const char* data, size_t length) { return stream->feed(data, length); });
+        }
+    } catch (const std::exception&) {
+        complete = false;
+    }
+    stream->end_body(complete);
+    std::string reply;
+    std::string type;
+    const auto status = stream->wait_for_status(reply, type);
+    if (status == 0) { reply_error(res, 502, "Cannot reach that device's server through the mesh"); return; }
+    if (status < 200 || status >= 300) {
+        res.status = status;
+        res.set_content(reply, type.empty() ? "application/json" : type);
+        return;
+    }
+    res.status = status;
+    res.set_chunked_content_provider(type.empty() ? "application/json" : type,
+        [stream](size_t, httplib::DataSink& sink) { return stream->pull(sink); },
+        [stream](bool) { stream->abandon(); });
 }
 
 }
@@ -2713,7 +2837,7 @@ void NexusManager::handle(const httplib::Request& req, httplib::Response& res,
     }
 }
 
-void NexusManager::relay(const httplib::Request& req, httplib::Response& res) {
+void NexusManager::relay(const httplib::Request& req, httplib::Response& res, const httplib::ContentReader* reader) {
     uint16_t port = 0;
     {
         std::lock_guard<std::mutex> session_lock(session_mutex_);
@@ -2726,7 +2850,9 @@ void NexusManager::relay(const httplib::Request& req, httplib::Response& res) {
     }
     auto path = req.matches[2].str();
     if (const auto query = req.target.find('?'); query != std::string::npos) path += req.target.substr(query);
-    nexus_access::relay_http(port, path, req, res, req.get_header_value(nexus_access::kPeerAuthorizationHeader), req.body);
+    const auto peer_authorization = req.get_header_value(nexus_access::kPeerAuthorizationHeader);
+    if (reader) nexus_access::relay_http_upload(port, path, req, res, peer_authorization, *reader);
+    else nexus_access::relay_http(port, path, req, res, peer_authorization, req.body);
 }
 
 void NexusManager::register_routes(httplib::Server& server, NexusListener listener) {
@@ -2762,8 +2888,15 @@ void NexusManager::register_routes(httplib::Server& server, NexusListener listen
             if (access.first != 0) { reply_error(res, access.first, access.second); return; }
             relay(req, res);
         };
+        // A POST body is read by the relay, so a large one goes to the peer while it arrives.
+        const auto relay_upload = [this, listener](const httplib::Request& req, httplib::Response& res,
+                                                   const httplib::ContentReader& reader) {
+            const auto access = nexus_access::route_access(listener, req, "relay");
+            if (access.first != 0) { reply_error(res, access.first, access.second); return; }
+            relay(req, res, &reader);
+        };
         server.Get(relayed, relay_route);
-        server.Post(relayed, relay_route);
+        server.Post(relayed, relay_upload);
     }
 }
 }

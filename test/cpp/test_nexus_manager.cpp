@@ -244,6 +244,28 @@ void check_relay_stream(const std::function<void(bool, const char*)>& check) {
             return true;
         });
     });
+    // Echoes what arrived, so a relayed upload can be compared byte for byte.
+    peer.Post("/api/v1/echo", [&](const httplib::Request& req, httplib::Response& res) {
+        seen_authorization = req.get_header_value("Authorization");
+        if (seen_authorization != "Bearer peer-key") {
+            res.status = 401;
+            res.set_content(R"({"error":"API key required"})", "application/json");
+            return;
+        }
+        if (req.is_multipart_form_data()) {
+            json parts = json::object();
+            for (const auto& field : req.form.fields) parts[field.first] = field.second.content;
+            for (const auto& file : req.form.files) {
+                parts[file.first] = {{"filename", file.second.filename}, {"type", file.second.content_type},
+                                     {"size", file.second.content.size()},
+                                     {"same", file.second.content == std::string(2 * 1024 * 1024 + 7, 'f')}};
+            }
+            res.set_content(parts.dump(), "application/json");
+            return;
+        }
+        seen_body = req.body;
+        res.set_content(json{{"size", req.body.size()}}.dump(), "application/json");
+    });
     const int peer_port = peer.bind_to_any_port("127.0.0.1");
     std::thread peer_worker([&] { peer.listen_after_bind(); });
     peer.wait_until_ready();
@@ -256,6 +278,13 @@ void check_relay_stream(const std::function<void(bool, const char*)>& check) {
     front.Post(R"(/relay(/.*))", relay);
     front.Post(R"(/closed(/.*))", [&](const httplib::Request& req, httplib::Response& res) {
         access::relay_http(1, req.matches[1].str(), req, res, req.get_header_value(access::kPeerAuthorizationHeader), req.body);
+    });
+    front.Post(R"(/upload(/.*))", [&](const httplib::Request& req, httplib::Response& res, const httplib::ContentReader& reader) {
+        access::relay_http_upload(static_cast<uint16_t>(peer_port), req.matches[1].str(), req, res,
+                                  req.get_header_value(access::kPeerAuthorizationHeader), reader);
+    });
+    front.Post(R"(/upload-closed(/.*))", [&](const httplib::Request& req, httplib::Response& res, const httplib::ContentReader& reader) {
+        access::relay_http_upload(1, req.matches[1].str(), req, res, req.get_header_value(access::kPeerAuthorizationHeader), reader);
     });
     const int front_port = front.bind_to_any_port("127.0.0.1");
     std::thread front_worker([&] { front.listen_after_bind(); });
@@ -291,6 +320,35 @@ void check_relay_stream(const std::function<void(bool, const char*)>& check) {
         "Relay forwards a GET with the peer key");
     auto unreachable = client.Post("/closed/api/v1/chat/completions", keys, "{}", "application/json");
     check(unreachable && unreachable->status == 502, "Relay reports an unreachable peer");
+
+    // Uploads: a small body is held and relayed as before; a large one, one of unknown
+    // size and a form go to the peer while they arrive.
+    auto small_stream = client.Post("/upload/api/v1/chat/completions", keys, R"({"stream":true})", "application/json");
+    check(small_stream && small_stream->status == 200 && small_stream->get_header_value("Content-Type") == "text/event-stream" &&
+        small_stream->body == "data: {\"n\":1}\n\ndata: {\"n\":2}\n\ndata: [DONE]\n\n", "A small upload is relayed like any request");
+    std::string large(3 * 1024 * 1024 + 11, '\0');
+    for (size_t i = 0; i < large.size(); ++i) large[i] = static_cast<char>('a' + (i * 7) % 26);
+    auto big = client.Post("/upload/api/v1/echo", keys, large, "application/octet-stream");
+    check(big && big->status == 200 && seen_body == large && json::parse(big->body, nullptr, false).value("size", 0) == static_cast<int>(large.size()),
+        "A large upload reaches the peer byte for byte");
+    seen_body.clear();
+    auto unsized = client.Post("/upload/api/v1/echo", keys,
+        [&large](size_t offset, httplib::DataSink& sink) {
+            if (offset >= large.size()) { sink.done(); return true; }
+            return sink.write(large.data() + offset, std::min<size_t>(65536, large.size() - offset));
+        }, "application/octet-stream");
+    check(unsized && unsized->status == 200 && seen_body == large, "An upload of unknown size reaches the peer byte for byte");
+    auto form = client.Post("/upload/api/v1/echo", keys, httplib::UploadFormDataItems{
+        {"model", "whisper-small", "", ""}, {"file", std::string(2 * 1024 * 1024 + 7, 'f'), "clip.wav", "audio/wav"}});
+    const auto parts = form ? json::parse(form->body, nullptr, false) : json();
+    check(form && form->status == 200 && parts.is_object() && parts.value("model", "") == "whisper-small" &&
+        parts.contains("file") && parts["file"].value("filename", "") == "clip.wav" && parts["file"].value("type", "") == "audio/wav" &&
+        parts["file"].value("same", false), "A form reaches the peer part by part, fields and files intact");
+    auto refused_upload = client.Post("/upload/api/v1/echo", httplib::Headers{{"Authorization", "Bearer local-key"}}, large, "application/octet-stream");
+    check(refused_upload && refused_upload->status == 401 && refused_upload->body == R"({"error":"API key required"})",
+        "A peer refusal of a large upload keeps its status and body");
+    auto unreachable_upload = client.Post("/upload-closed/api/v1/echo", keys, large, "application/octet-stream");
+    check(unreachable_upload && unreachable_upload->status == 502, "A large upload to an unreachable peer answers 502");
     front.stop(); front_worker.join();
     peer.stop(); peer_worker.join();
 }

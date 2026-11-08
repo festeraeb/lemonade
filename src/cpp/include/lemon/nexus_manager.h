@@ -247,6 +247,15 @@ bool route_policy_available();
 /// body. An unreachable peer answers 502.
 void relay_http(uint16_t port, const std::string& path, const httplib::Request& req, httplib::Response& res,
     const std::string& peer_authorization, const std::string& body);
+/// relay_http for a POST route registered with a ContentReader. A body of up to
+/// kRelayHeldBody bytes is read and passed to relay_http. A larger one, one of unknown
+/// size, or a form goes to the peer while it arrives (a form part by part), so no hop
+/// holds it whole; the reply is then passed through as it comes, with the peer's
+/// status and Content-Type, and a transfer that breaks cuts the reply off (an event
+/// stream ends with one `event: error` event instead, as in relay_http).
+inline constexpr size_t kRelayHeldBody = 1024 * 1024;
+void relay_http_upload(uint16_t port, const std::string& path, const httplib::Request& req, httplib::Response& res,
+    const std::string& peer_authorization, const httplib::ContentReader& reader);
 }
 
 class NexusManager {
@@ -281,7 +290,7 @@ private:
     /// `controller_url`, when set, replaces the management listener in a status reply.
     void handle(const httplib::Request& req, httplib::Response& res, const std::string& operation, bool remote,
                 const std::string& controller_url = {});
-    void relay(const httplib::Request& req, httplib::Response& res);
+    void relay(const httplib::Request& req, httplib::Response& res, const httplib::ContentReader* reader = nullptr);
     std::pair<int, json> control(const std::string& method, const std::string& path, const json& body,
                                const std::string& caller_key = "");
     std::string data_root_;
