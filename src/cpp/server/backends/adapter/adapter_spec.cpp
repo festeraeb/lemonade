@@ -591,14 +591,38 @@ check_progress:
     return result;
 }
 
-// ---- not built yet: forge jobs AP10, AP11 ----
+// ---- AP11: device values for {device} and {gpu_uuids} placeholders ----
 
-json memory_telemetry(const json&) {
-    throw std::logic_error("AP10 memory_telemetry not built yet");
-}
+DeviceValues device_values(const std::string& requested, const std::string& spec_default, const std::vector<Gpu>& inventory) {
+    // Helper to trim leading/trailing whitespace
+    auto trim = [](std::string s) -> std::string {
+        size_t start = s.find_first_not_of(" \t\r\n");
+        if (start == std::string::npos) return "";
+        size_t end = s.find_last_not_of(" \t\r\n");
+        return s.substr(start, end - start + 1);
+    };
 
-DeviceValues device_values(const std::string&, const std::string&, const std::vector<Gpu>&) {
-    throw std::logic_error("AP11 device_values not built yet");
+    // Trim the inputs
+    std::string req = trim(requested);
+    std::string def = trim(spec_default);
+
+    // With an empty inventory, the old rule holds: device is `requested` (or default or "0"),
+    // and gpu_uuids = device. No trimming, no checking.
+    if (inventory.empty()) {
+        if (req.empty()) req = def;
+        if (req.empty()) req = "0";
+        return DeviceValues{req, req};
+    }
+
+    // Otherwise, choose_device decides and its SpecError propagates
+    DeviceChoice choice = choose_device(req, def, inventory);
+
+    // device = std::to_string(choice.index)
+    // gpu_uuids = choice.uuid, or device when choice.uuid is empty
+    std::string device = std::to_string(choice.index);
+    std::string gpu_uuids = choice.uuid.empty() ? device : choice.uuid;
+
+    return DeviceValues{device, gpu_uuids};
 }
 
 }  // namespace specs
