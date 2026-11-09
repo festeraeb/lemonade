@@ -1,6 +1,8 @@
 #include "adapter_spec.h"
 
 #include <cctype>
+#include <map>
+#include <regex>
 #include <sstream>
 
 namespace lemon {
@@ -44,8 +46,59 @@ bool contains(const json& values, const std::string& v) {
 
 // ---- not built yet: each is one forge job (~/agentnotes/adapter-nexus-forge-plan-2026-11-09.md) ----
 
-std::vector<std::string> build_argv(const json&, const std::map<std::string, std::string>&) {
-    throw std::logic_error("AP2 build_argv not built yet");
+std::vector<std::string> build_argv(const json& spec, const std::map<std::string, std::string>& values) {
+    std::vector<std::string> argv;
+
+    // Helper to replace placeholders in a string
+    auto replace_placeholders = [&](const std::string& s) -> std::string {
+        std::string result;
+        std::regex placeholder(R"(\{[A-Za-z_][A-Za-z0-9_]*\})");
+        std::sregex_iterator it(s.begin(), s.end(), placeholder);
+        std::sregex_iterator end;
+
+        size_t last = 0;
+        for (; it != end; ++it) {
+            result.append(s.substr(last, it->position() - last));
+            std::string token = it->str();
+            // Check if token is a known placeholder
+            if (std::find(kPlaceholders.begin(), kPlaceholders.end(), token) == kPlaceholders.end()) {
+                throw SpecError("unexpected placeholder '" + token + "'");
+            }
+            // Check if value is supplied
+            auto val_it = values.find(token);
+            if (val_it == values.end()) {
+                throw SpecError("placeholder '" + token + "' not supplied");
+            }
+            result += val_it->second;
+            last = it->position() + it->length();
+        }
+        result.append(s.substr(last));
+        return result;
+    };
+
+    if (spec.contains("args")) {
+        if (!spec["args"].is_array()) {
+            throw SpecError("args");
+        }
+        for (const auto& arg : spec["args"]) {
+            if (!arg.is_string()) {
+                throw SpecError("args");
+            }
+            argv.push_back(replace_placeholders(arg.get<std::string>()));
+        }
+    } else if (spec.contains("args_template")) {
+        int version = spec.contains("spec_version") ? spec["spec_version"].get<int>() : 1;
+        if (version > 1) {
+            throw SpecError("args_template");
+        }
+        std::string tmpl = spec["args_template"].get<std::string>();
+        std::vector<std::string> tokens = split_args(tmpl);
+        for (const auto& token : tokens) {
+            argv.push_back(replace_placeholders(token));
+        }
+    }
+
+    return argv;
 }
 
 std::vector<std::pair<std::string, std::string>> build_env(
