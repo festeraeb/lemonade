@@ -52,7 +52,9 @@ inline const std::vector<std::string> kPlaceholders = {
 //   - an element contains a "{...}" token that is not in kPlaceholders (named in the message);
 //   - an element uses a placeholder that `values` does not supply (named in the message).
 // A spec with no "args" may give "args_template" (one string split on whitespace) only when its
-// spec_version is 1 or absent; at a higher spec_version args_template is a SpecError.
+// spec_version is 1 or absent; at a higher spec_version args_template is a SpecError. A spec_version
+// that is not an integer, or an args_template that is not a string, is a SpecError naming the field.
+// No input may escape as any exception other than SpecError.
 // No "args" and no "args_template" gives an empty argv. Each element stays one argv entry after
 // filling, even when a value contains spaces (no re-splitting of "args" elements).
 std::vector<std::string> build_argv(const json& spec, const std::map<std::string, std::string>& values);
@@ -88,8 +90,10 @@ struct DeviceChoice {
 
 // Resolves the device to run on. `requested` (the user's adapter_device option) wins when not
 // empty, else `spec_default`, else "0". The text is a decimal index (e.g. "1") or a uuid that must
-// match one entry of `inventory` exactly (case-insensitive). Throws SpecError when the index is not
-// in the inventory, the uuid matches none, or the text is neither. Leading/trailing spaces ignored.
+// match one entry of `inventory` exactly (case-insensitive). An index is matched against
+// Gpu::index, never the position in `inventory` (an inventory may be sparse, e.g. indexes 1 and 3,
+// or unordered). Throws SpecError when no entry has that index, the uuid matches none, the number
+// does not fit an int, or the text is neither. Leading/trailing spaces ignored.
 DeviceChoice choose_device(const std::string& requested, const std::string& spec_default, const std::vector<Gpu>& inventory);
 
 // ---- AP5 (R16): is this a spec we can run --------------------------------------------------

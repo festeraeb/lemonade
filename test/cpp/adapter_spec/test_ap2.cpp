@@ -34,6 +34,11 @@ static int body() {
     THROWS(build_argv(json{{"args", {"--ctx", "{ctx}"}}}, vals), "{ctx}");
     THROWS(build_argv(json{{"args_template", "--uuids {gpu_uuids}"}}, vals), "{gpu_uuids}");
 
+    // wrong types are SpecErrors that name the field, never a json type_error
+    THROWS(build_argv(json{{"args_template", 7}}, vals), "args_template");
+    THROWS(build_argv(json{{"spec_version", "1"}, {"args_template", "--port {port}"}}, vals), "spec_version");
+    THROWS(build_argv(json{{"spec_version", 1.5}, {"args_template", "--port {port}"}}, vals), "spec_version");
+
     // braces that are not a placeholder token pass through (JSON in an argument)
     CHECK(build_argv(json{{"args", {"--cfg", "{}"}}}, vals) == (V{"--cfg", "{}"}));
     return report("ap2");

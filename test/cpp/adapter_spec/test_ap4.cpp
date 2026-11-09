@@ -24,6 +24,18 @@ static int body() {
     THROWS(choose_device("1.5", "", inv), "1.5");
     THROWS(choose_device("GPU-52c983ba", "", inv), "GPU-52c983ba");  // a prefix is not a match
     THROWS(choose_device("0", "", {}), "0");                          // no cards
+
+    // an index names Gpu::index, not a position: sparse and unordered inventories
+    const std::vector<Gpu> sparse = {{1, "GPU-one"}, {3, "GPU-three"}};
+    CHECK(is(choose_device("3", "", sparse), 3, "GPU-three"));
+    CHECK(is(choose_device("1", "", sparse), 1, "GPU-one"));
+    THROWS(choose_device("2", "", sparse), "2");
+    THROWS(choose_device("", "", sparse), "0");                       // the default 0 is not there
+    const std::vector<Gpu> unordered = {{2, "GPU-x"}, {0, "GPU-y"}};
+    CHECK(is(choose_device("0", "", unordered), 0, "GPU-y"));
+    CHECK(is(choose_device("2", "", unordered), 2, "GPU-x"));
+    // a number too large for int is a SpecError, not std::out_of_range
+    THROWS(choose_device("99999999999999999999", "", inv), "99999999999999999999");
     return report("ap4");
 }
 

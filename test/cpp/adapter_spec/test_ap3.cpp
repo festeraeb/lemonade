@@ -26,7 +26,10 @@ static int body() {
     CHECK(build_env(json{{"LD_LIBRARY_PATH", "{spec_dir}/lib:/mnt/raid0/engines/llama.cpp/b1/cuda12-libs"}}, vals, dirs) ==
           (E{{"LD_LIBRARY_PATH", "/opt/eng/lib:/mnt/raid0/engines/llama.cpp/b1/cuda12-libs"}}));
     CHECK(build_env(json{{"LD_LIBRARY_PATH", "/opt/eng"}}, vals, dirs).size() == 1);   // the dir itself
-    CHECK(build_env(json{{"LD_LIBRARY_PATH", "/opt/eng/lib::"}}, vals, dirs).size() == 1);  // empty entries ignored
+    // empty entries are ignored by the check, and the value is returned as given (not rebuilt)
+    CHECK(build_env(json{{"LD_LIBRARY_PATH", "/opt/eng/lib::"}}, vals, dirs) == (E{{"LD_LIBRARY_PATH", "/opt/eng/lib::"}}));
+    CHECK(build_env(json{{"LD_LIBRARY_PATH", "/opt/eng::/opt/eng/lib"}}, vals, dirs) ==
+          (E{{"LD_LIBRARY_PATH", "/opt/eng::/opt/eng/lib"}}));
     THROWS(build_env(json{{"LD_LIBRARY_PATH", "/tmp/evil"}}, vals, dirs), "/tmp/evil");
     THROWS(build_env(json{{"LD_LIBRARY_PATH", "/opt/engine2/lib"}}, vals, dirs), "/opt/engine2/lib");  // prefix, not a dir
     THROWS(build_env(json{{"LD_LIBRARY_PATH", "/opt/eng/../../tmp"}}, vals, dirs), "..");
