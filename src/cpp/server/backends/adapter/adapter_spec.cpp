@@ -103,6 +103,9 @@ SpecCheck check_spec(const json& spec) {
         if (!spec["spec_version"].is_number_integer() || spec["spec_version"].get<int>() < 1) {
             result.level_cap = 0;
             result.problems.emplace_back("spec_version must be integer >= 1");
+        } else if (spec["spec_version"].get<int>() > kSpecVersion) {
+            result.level_cap = 0;
+            result.problems.emplace_back("spec_version must be <= " + std::to_string(kSpecVersion));
         }
     }
 
