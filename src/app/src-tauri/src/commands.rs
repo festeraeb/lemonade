@@ -231,8 +231,8 @@ pub(crate) fn list_lan_servers() -> Vec<crate::lan_servers::LanServer> {
 
 /// `state`: "accepted" (the user pressed Use), "ignored", or "new" (forget the choice).
 #[tauri::command]
-pub(crate) fn set_lan_server_state(app: AppHandle, id: String, state: String, url: Option<String>) -> Result<(), String> {
-    crate::lan_servers::set_choice(&id, &state, url.as_deref())?;
+pub(crate) fn set_lan_server_state(app: AppHandle, id: String, state: String, url: Option<String>, public_key: Option<String>) -> Result<(), String> {
+    crate::lan_servers::set_choice(&id, &state, url.as_deref(), public_key.as_deref())?;
     let _ = app.emit(events::LAN_SERVERS_UPDATED, ());
     Ok(())
 }
