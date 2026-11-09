@@ -68,7 +68,7 @@ MemoryReport parse_memory_report(const json& body) {
     std::vector<DeviceMemory> devices;
 
     if (body.contains("devices")) {
-        const json& devices_json = body["devices"];
+        const json& devices_json = body.value("devices", json());
         if (devices_json.is_null()) {
             // "devices" may be absent (empty)
         } else if (devices_json.is_object()) {
@@ -80,7 +80,7 @@ MemoryReport parse_memory_report(const json& body) {
             for (const auto& dev : devices_json) {
                 if (!dev.is_object()) throw SpecError("device must be object");
 
-                const auto& uuid_val = dev["uuid"];
+                const auto& uuid_val = dev.value("uuid", json());
                 if (!uuid_val.is_string() || uuid_val.get<std::string>().empty()) {
                     throw SpecError("device uuid missing or empty");
                 }
@@ -94,14 +94,14 @@ MemoryReport parse_memory_report(const json& body) {
                 }
                 seen_uuids.insert(uuid_lower);
 
-                const auto& bytes_val = dev["bytes"];
+                const auto& bytes_val = dev.value("bytes", json());
                 if (!bytes_val.is_number_integer() || bytes_val.get<int64_t>() < 0) {
                     throw SpecError("device bytes must be a non-negative integer");
                 }
                 uint64_t bytes = static_cast<uint64_t>(bytes_val.get<int64_t>());
 
                 bool evictable = false;
-                const auto& evictable_val = dev["evictable"];
+                const auto& evictable_val = dev.value("evictable", json());
                 if (evictable_val.is_boolean()) {
                     evictable = evictable_val.get<bool>();
                 }
@@ -113,7 +113,7 @@ MemoryReport parse_memory_report(const json& body) {
 
     uint64_t pinned_host = 0;
     if (body.contains("pinned_host")) {
-        const auto& val = body["pinned_host"];
+        const auto& val = body.value("pinned_host", json(0));
         if (!val.is_number_integer() || val.get<int64_t>() < 0) {
             throw SpecError("pinned_host must be a non-negative integer");
         }
@@ -122,7 +122,7 @@ MemoryReport parse_memory_report(const json& body) {
 
     uint64_t remote = 0;
     if (body.contains("remote")) {
-        const auto& val = body["remote"];
+        const auto& val = body.value("remote", json(0));
         if (!val.is_number_integer() || val.get<int64_t>() < 0) {
             throw SpecError("remote must be a non-negative integer");
         }
@@ -131,7 +131,7 @@ MemoryReport parse_memory_report(const json& body) {
 
     uint64_t disk = 0;
     if (body.contains("disk")) {
-        const auto& val = body["disk"];
+        const auto& val = body.value("disk", json(0));
         if (!val.is_number_integer() || val.get<int64_t>() < 0) {
             throw SpecError("disk must be a non-negative integer");
         }
