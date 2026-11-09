@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <charconv>
 #include <map>
 #include <regex>
 #include <sstream>
@@ -208,11 +209,20 @@ DeviceChoice choose_device(const std::string& requested, const std::string& spec
     // Check if input is a decimal index
     bool is_digit = std::all_of(req.begin(), req.end(), ::isdigit);
     if (is_digit) {
-        int idx = std::stoi(req);
-        if (idx < 0 || static_cast<size_t>(idx) >= inventory.size()) {
+        // Use from_chars to safely parse and detect overflow
+        int idx = 0;
+        auto [ptr, ec] = std::from_chars(req.data(), req.data() + req.size(), idx);
+        if (ec != std::errc() || ptr != req.data() + req.size()) {
             throw SpecError("Invalid device index: " + req);
         }
-        return DeviceChoice{idx, inventory[idx].uuid};
+        
+        // Loop over inventory entries and compare g.index (not use as vector position)
+        for (const auto& g : inventory) {
+            if (g.index == idx) {
+                return DeviceChoice{idx, g.uuid};
+            }
+        }
+        throw SpecError("Invalid device index: " + req);
     }
 
     // Check if input is a UUID (case-insensitive match)
