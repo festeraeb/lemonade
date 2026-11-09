@@ -106,7 +106,7 @@ MemoryReport parse_memory_report(const json& body) {
                     evictable = evictable_val.get<bool>();
                 }
 
-                devices.push_back({uuid_lower, bytes, evictable});
+                devices.push_back({uuid, bytes, evictable});
             }
         }
     }
