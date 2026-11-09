@@ -155,7 +155,11 @@ uint64_t device_bytes(const MemoryReport& report, const std::string& uuid) {
         uuid_lower += static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
     }
     for (const auto& dev : report.devices) {
-        if (dev.uuid == uuid_lower) {
+        std::string dev_uuid_lower;
+        for (char c : dev.uuid) {
+            dev_uuid_lower += static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+        }
+        if (dev_uuid_lower == uuid_lower) {
             return dev.bytes;
         }
     }
