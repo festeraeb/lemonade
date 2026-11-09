@@ -74,7 +74,7 @@ uint64_t device_bytes(const MemoryReport&, const std::string&) {
 }
 
 json budget_request(const std::string& uuid, int64_t mib) {
-    if (uuid.empty()) throw SpecError("empty uuid");
+    if (uuid.empty()) throw SpecError("empty device");
     if (mib < 0) throw SpecError("negative mib");
     return json{{"device", uuid}, {"mib", mib}};
 }
@@ -86,8 +86,9 @@ BudgetResult parse_budget_reply(const json& body) {
     bool accepted = body["accepted"].get<bool>();
     if (accepted) {
         if (!body.contains("now_bytes")) throw SpecError("now_bytes missing");
-        if (!body["now_bytes"].is_number_unsigned()) throw SpecError("now_bytes negative");
-        return BudgetResult{accepted, body["now_bytes"].get<uint64_t>(), ""};
+        const auto& nb = body["now_bytes"];
+        if (!nb.is_number_integer() || nb.get<int64_t>() < 0) throw SpecError("now_bytes negative");
+        return BudgetResult{accepted, static_cast<uint64_t>(nb.get<int64_t>()), ""};
     }
     return BudgetResult{accepted, 0, body.value("reason", "")};
 }
