@@ -102,7 +102,8 @@ struct DeviceValues {
     std::string gpu_uuids;  // the card's uuid, or the index text when the card has no uuid
 };
 // With an empty inventory (lemond found no card list on this host) the old rule holds: device is
-// `requested`, else `spec_default`, else "0" (no trimming, no checking), and gpu_uuids = device.
+// `requested`, else `spec_default`, else "0" (each trimmed of spaces; nothing else checked), and
+// gpu_uuids = device.
 // Otherwise choose_device(requested, spec_default, inventory) decides and its SpecError propagates:
 // device = std::to_string(choice.index), gpu_uuids = choice.uuid, or device when choice.uuid is empty.
 DeviceValues device_values(const std::string& requested, const std::string& spec_default, const std::vector<Gpu>& inventory);
