@@ -49,7 +49,7 @@ def gpu_mib() -> dict[int, int]:
         out = _run([os.environ.get('ALL_SMI', 'all-smi'), 'snapshot'])
         data = json.loads(out)
         gpus = [g for g in data.get('gpus', []) if g.get('device_type', 'GPU') == 'GPU']
-        return {i: g.get('memory_used', 0) // 1048576 for i, g in enumerate(gpus)}
+        return {i: g.get('used_memory', 0) // 1048576 for i, g in enumerate(gpus)}
     except (OSError, subprocess.SubprocessError, ValueError):
         try:
             out = _run(['nvidia-smi', '--query-gpu=index,memory.used', '--format=csv,noheader,nounits'])
