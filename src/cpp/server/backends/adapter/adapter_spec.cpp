@@ -591,10 +591,27 @@ check_progress:
     return result;
 }
 
-// ---- not built yet: forge jobs AP10, AP11 ----
-
-json memory_telemetry(const json&) {
-    throw std::logic_error("AP10 memory_telemetry not built yet");
+// ---- AP10 (R9): the "adapter_memory" object lemond's stats show for an engine's memory answer:
+//   {"devices": [{"uuid": "..", "bytes": N, "evictable": bool}, ...], "pinned_host": N, "remote": N,
+//    "disk": N, "local_bytes": N}   (local_bytes is local_bytes(report))
+// When the answer does not parse (parse_memory_report throws), {"error": "<its message>"}. Never throws.
+json memory_telemetry(const json& body) {
+    try {
+        MemoryReport report = parse_memory_report(body);
+        uint64_t local = local_bytes(report);
+        json result;
+        result["devices"] = json::array();
+        for (const auto& d : report.devices) {
+            result["devices"].push_back({{"uuid", d.uuid}, {"bytes", d.bytes}, {"evictable", d.evictable}});
+        }
+        result["pinned_host"] = report.pinned_host;
+        result["remote"] = report.remote;
+        result["disk"] = report.disk;
+        result["local_bytes"] = local;
+        return result;
+    } catch (const std::exception& e) {
+        return json{{"error", e.what()}};
+    }
 }
 
 DeviceValues device_values(const std::string&, const std::string&, const std::vector<Gpu>&) {
