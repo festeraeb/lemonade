@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import subprocess
 import sys
 import time
@@ -38,14 +39,27 @@ def loaded(base: str) -> list[str]:
     return [m.get("model_name") for m in call(base, "/api/v1/health", timeout=10).get("all_models_loaded", [])]
 
 
+def _run(cmd: list[str]) -> str:
+    return subprocess.run(cmd, capture_output=True, text=True, timeout=30, check=True).stdout
+
+
 def gpu_mib() -> dict[int, int]:
     """GPU index -> MiB used. Empty when nvidia-smi is not installed (the GPU checks then cannot pass)."""
     try:
-        out = subprocess.run(["nvidia-smi", "--query-gpu=index,memory.used", "--format=csv,noheader,nounits"],
-                             capture_output=True, text=True, timeout=30).stdout
-    except (OSError, subprocess.TimeoutExpired):
-        return {}
-    return {int(i): int(m) for i, m in (line.split(",") for line in out.strip().splitlines() if "," in line)}
+        out = _run([os.environ.get('ALL_SMI', 'all-smi'), 'snapshot'])
+        data = json.loads(out)
+        gpus = [g for g in data.get('gpus', []) if g.get('device_type', 'GPU') == 'GPU']
+        return {i: g.get('memory_used', 0) // 1048576 for i, g in enumerate(gpus)}
+    except (OSError, subprocess.SubprocessError, ValueError):
+        try:
+            out = _run(['nvidia-smi', '--query-gpu=index,memory.used', '--format=csv,noheader,nounits'])
+            result = {}
+            for line in out.splitlines():
+                idx, mem = line.split(',')
+                result[int(idx)] = int(mem)
+            return result
+        except (OSError, subprocess.SubprocessError):
+            return {}
 
 
 def chat(base: str, model: str) -> str:
