@@ -21,6 +21,7 @@ import argparse
 import hashlib
 import json
 import os
+import re
 import subprocess
 import sys
 import time
@@ -85,6 +86,11 @@ def gpu_mib() -> dict[int, int]:
             out = _run(['nvidia-smi', '--query-gpu=index,memory.used', '--format=csv,noheader,nounits'])
             result = {}
             for line in out.splitlines():
+                line = line.strip()
+                if not line:
+                    continue
+                if not re.match(r'^\d+,\s*\d+$', line):
+                    continue
                 idx, mem = line.split(',')
                 result[int(idx)] = int(mem)
             return result
