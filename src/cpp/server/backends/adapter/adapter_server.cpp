@@ -182,6 +182,10 @@ void AdapterServer::load(const std::string& model_name, const ModelInfo& model_i
     std::vector<std::string> allowed_dirs = {spec_dir.string()};
     if (fs::path(command.program).is_absolute()) {
         allowed_dirs.push_back(fs::path(command.program).parent_path().string());
+        // When the binary's directory is named "bin", also push the engine bundle's root (parent of <binary>/bin) to allow LD_LIBRARY_PATH to point to sibling lib directories.
+        if (fs::path(command.program).parent_path().filename() == "bin") {
+            allowed_dirs.push_back(fs::path(command.program).parent_path().parent_path().string());
+        }
     }
     try {
         for (auto& [k, v] : adapter::specs::build_env(env, subs, allowed_dirs)) {
