@@ -91,6 +91,12 @@ std::vector<std::string> build_argv(const json& spec, const std::map<std::string
             argv.push_back(replace_placeholders(arg.get<std::string>()));
         }
     } else if (spec.contains("args_template")) {
+        if (!spec["args_template"].is_string()) {
+            throw SpecError("args_template");
+        }
+        if (spec.contains("spec_version") && !spec["spec_version"].is_number_integer()) {
+            throw SpecError("spec_version");
+        }
         int version = spec.contains("spec_version") ? spec["spec_version"].get<int>() : 1;
         if (version > 1) {
             throw SpecError("args_template");
