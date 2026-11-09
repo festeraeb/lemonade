@@ -1,4 +1,5 @@
 #include "lemon/backends/adapter/adapter_server.h"
+#include "adapter_spec.h"
 
 #include "lemon/backends/adapter/adapter.h"
 #include "lemon/backends/backend_ops.h"
@@ -55,17 +56,12 @@ std::string adapters_dir() {
 
 namespace {
 
-// The newest spec schema this backend reads. A newer spec is refused (run the engine without control instead).
-constexpr int kSpecVersion = 1;
-
-// A spec name is a file stem in the adapters folder: no separators, no "..".
-bool valid_spec_name(const std::string& name) {
-    if (name.empty() || name.size() > 64) return false;
-    for (char c : name) {
-        if (!(std::isalnum(static_cast<unsigned char>(c)) || c == '-' || c == '_' || c == '.')) return false;
-    }
-    return name.find("..") == std::string::npos;
-}
+// The pure spec helpers live in adapter_spec.{h,cpp}, tested without lemond (test/cpp/adapter_spec/).
+using adapter::specs::contains;
+using adapter::specs::fill;
+using adapter::specs::kSpecVersion;
+using adapter::specs::split_args;
+using adapter::specs::valid_spec_name;
 
 json read_spec(const std::string& name, fs::path& spec_dir) {
     if (!valid_spec_name(name)) {
@@ -85,32 +81,6 @@ json read_spec(const std::string& name, fs::path& spec_dir) {
     }
     spec_dir = path.parent_path();
     return spec;
-}
-
-std::string fill(std::string text, const std::map<std::string, std::string>& subs) {
-    for (const auto& [key, value] : subs) {
-        for (size_t at = text.find(key); at != std::string::npos; at = text.find(key, at + value.size())) {
-            text.replace(at, key.size(), value);
-        }
-    }
-    return text;
-}
-
-std::vector<std::string> split_args(const std::string& text) {
-    std::vector<std::string> out;
-    std::istringstream in(text);
-    for (std::string word; in >> word;) {
-        out.push_back(word);
-    }
-    return out;
-}
-
-bool contains(const json& values, const std::string& v) {
-    if (!values.is_array()) return false;
-    for (const auto& x : values) {
-        if (x.is_string() && x.get<std::string>() == v) return true;
-    }
-    return false;
 }
 
 // The engine program: an absolute path, a path relative to the spec's folder, or a name on PATH.
