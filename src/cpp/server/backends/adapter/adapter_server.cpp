@@ -182,7 +182,7 @@ void AdapterServer::load(const std::string& model_name, const ModelInfo& model_i
     if (port_ == 0) {
         throw std::runtime_error("adapter: failed to allocate a port for " + name);
     }
-    const std::map<std::string, std::string> subs = {
+    std::map<std::string, std::string> subs = {
         {"{model}", model_path}, {"{model_path}", model_path}, {"{port}", std::to_string(port_)}, {"{device}", device},
         {"{spec_dir}", spec_dir.string()}};
     subs["{gpu_uuids}"] = gpu_uuids;
