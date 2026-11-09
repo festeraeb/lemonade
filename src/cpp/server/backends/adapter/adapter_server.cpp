@@ -165,17 +165,12 @@ void AdapterServer::load(const std::string& model_name, const ModelInfo& model_i
             if (g.index >= 0) inventory.push_back({g.index, g.uuid});
     } catch (...) { }
     std::string gpu_uuids;
-    if (inventory.empty()) {
-        device = requested.empty() ? (spec_default.empty() ? std::string("0") : spec_default) : requested;
-        gpu_uuids = device;
-    } else {
-        try {
-            const auto choice = adapter::specs::choose_device(requested, spec_default, inventory);
-            device = std::to_string(choice.index);
-            gpu_uuids = choice.uuid.empty() ? device : choice.uuid;
-        } catch (const adapter::specs::SpecError& e) {
-            throw std::runtime_error("adapter " + name + ": " + std::string(e.what()));
-        }
+    try {
+        const auto values = adapter::specs::device_values(requested, spec_default, inventory);
+        device = values.device;
+        gpu_uuids = values.gpu_uuids;
+    } catch (const adapter::specs::SpecError& e) {
+        throw std::runtime_error("adapter " + name + ": " + std::string(e.what()));
     }
 
     port_ = choose_port();
