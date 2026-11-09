@@ -76,7 +76,7 @@ uint64_t device_bytes(const MemoryReport&, const std::string&) {
 json budget_request(const std::string& uuid, int64_t mib) {
     if (uuid.empty()) throw SpecError("empty uuid");
     if (mib < 0) throw SpecError("negative mib");
-    return BudgetResult{true, static_cast<uint64_t>(mib), ""};
+    return json{{"device", uuid}, {"mib", mib}};
 }
 
 BudgetResult parse_budget_reply(const json& body) {
