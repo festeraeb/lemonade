@@ -262,22 +262,7 @@ pub(crate) fn apply_choice(
     hostname: &str,
     url: &str,
 ) -> Result<(), String> {
-    let choice = match state {
-        "accepted" => Some(Choice::Accepted),
-        "ignored" => Some(Choice::Ignored),
-        "new" => None,
-        other => return Err(format!("unknown server state {other:?}")),
-    };
-    match choice {
-        None => {
-            servers.remove(id);
-        }
-        Some(choice) => {
-            let updated = SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
-            servers.insert(id.to_string(), SavedChoice { choice, hostname: hostname.to_string(), url: url.to_string(), updated, public_key: String::new() });
-        }
-    }
-    Ok(())
+    apply_choice_with_key(servers, id, state, hostname, url, None)
 }
 
 /// apply_choice that also records the server's device key. `public_key` None or empty keeps the key already saved
@@ -291,11 +276,33 @@ pub(crate) fn apply_choice_with_key(
     url: &str,
     public_key: Option<&str>,
 ) -> Result<(), String> {
-    let _ = (servers, id, state, hostname, url, public_key);
-    Err("N2b apply_choice_with_key not built yet".into())
+    let choice = match state {
+        "accepted" => Some(Choice::Accepted),
+        "ignored" => Some(Choice::Ignored),
+        "new" => None,
+        other => return Err(format!("unknown server state {other:?}")),
+    };
+    match choice {
+        None => {
+            servers.remove(id);
+        }
+        Some(choice) => {
+            let updated = SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
+            let existing_key = servers.get(id).map(|c| c.public_key.clone()).unwrap_or_default();
+            let effective_key = public_key.filter(|k| !k.is_empty()).unwrap_or(&existing_key);
+            servers.insert(id.to_string(), SavedChoice {
+                choice,
+                hostname: hostname.to_string(),
+                url: url.to_string(),
+                updated,
+                public_key: effective_key.to_string(),
+            });
+        }
+    }
+    Ok(())
 }
 
-pub(crate) fn set_choice(id: &str, state: &str, url: Option<&str>) -> Result<(), String> {
+pub(crate) fn set_choice(id: &str, state: &str, url: Option<&str>, public_key: Option<&str>) -> Result<(), String> {
     let mut servers = read_choices();
     let (hostname, first_url) = with_registry(|r| {
         r.seen
@@ -305,7 +312,7 @@ pub(crate) fn set_choice(id: &str, state: &str, url: Option<&str>) -> Result<(),
     });
     let hostname = if hostname.is_empty() { servers.get(id).map(|c| c.hostname.clone()).unwrap_or_default() } else { hostname };
     let url = url.map(str::to_string).filter(|u| !u.is_empty()).unwrap_or(first_url);
-    apply_choice(&mut servers, id, state, &hostname, &url)?;
+    apply_choice_with_key(&mut servers, id, state, &hostname, &url, public_key)?;
     write_choices(&servers)
 }
 
