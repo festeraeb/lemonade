@@ -38,6 +38,7 @@ public:
 private:
     std::string spec_name_;
     std::string telemetry_path_;
+    std::string memory_path_;
     bool completion_ = true;
 };
 
