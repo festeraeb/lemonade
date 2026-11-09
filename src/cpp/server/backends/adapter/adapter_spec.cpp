@@ -300,8 +300,114 @@ BudgetResult parse_budget_reply(const json& body) {
     return BudgetResult{accepted, 0, body.value("reason", "")};
 }
 
-Readiness ready_state(const json&, const json&) {
-    throw std::logic_error("AP8 ready_state not built yet");
+Readiness ready_state(const json& status, const json& ready_spec) {
+    Readiness result{ReadyState::Starting, -1};
+
+    // Get the json_field name from ready_spec
+    std::string json_field;
+    if (ready_spec.contains("json_field") && ready_spec["json_field"].is_string()) {
+        json_field = ready_spec["json_field"].get<std::string>();
+    }
+
+    // If no json_field: any object answer is Ready
+    if (json_field.empty()) {
+        if (status.is_object()) {
+            result.state = ReadyState::Ready;
+        }
+        return result;
+    }
+
+    // Non-object status is Starting
+    if (!status.is_object()) {
+        return result;
+    }
+
+    // Check if json_field exists in status
+    if (!status.contains(json_field)) {
+        return result;
+    }
+
+    const json& status_val = status[json_field];
+
+    // Non-object status value is Starting
+    if (!status_val.is_string()) {
+        return result;
+    }
+
+    std::string status_str = status_val.get<std::string>();
+
+    // Check error_values
+    if (ready_spec.contains("error_values") && ready_spec["error_values"].is_array()) {
+        for (const auto& v : ready_spec["error_values"]) {
+            if (v.is_string() && v.get<std::string>() == status_str) {
+                result.state = ReadyState::Error;
+                goto check_progress;
+            }
+        }
+    }
+
+    // Check warm_values
+    if (ready_spec.contains("warm_values") && ready_spec["warm_values"].is_array()) {
+        for (const auto& v : ready_spec["warm_values"]) {
+            if (v.is_string() && v.get<std::string>() == status_str) {
+                result.state = ReadyState::Warm;
+                goto check_progress;
+            }
+        }
+    }
+
+    // Check ready_values
+    if (ready_spec.contains("ready_values") && ready_spec["ready_values"].is_array()) {
+        for (const auto& v : ready_spec["ready_values"]) {
+            if (v.is_string() && v.get<std::string>() == status_str) {
+                result.state = ReadyState::Ready;
+                goto check_progress;
+            }
+        }
+    }
+
+    // Check loading_values
+    if (ready_spec.contains("loading_values") && ready_spec["loading_values"].is_array()) {
+        for (const auto& v : ready_spec["loading_values"]) {
+            if (v.is_string() && v.get<std::string>() == status_str) {
+                result.state = ReadyState::Loading;
+                goto check_progress;
+            }
+        }
+    }
+
+    // Not in any list -> Starting
+    return result;
+
+check_progress:
+    // Progress is read only while Loading
+    if (result.state == ReadyState::Loading) {
+        if (!ready_spec.contains("progress_field") || !ready_spec["progress_field"].is_string()) {
+            return result;  // progress_field missing from ready_spec -> -1
+        }
+        std::string progress_field = ready_spec["progress_field"].get<std::string>();
+
+        if (!status.contains(progress_field)) {
+            return result;  // progress_field missing from status -> -1
+        }
+
+        const json& progress_val = status[progress_field];
+
+        if (!progress_val.is_number()) {
+            return result;  // not a number -> -1
+        }
+
+        double progress = progress_val.get<double>();
+
+        if (progress >= 0.0 && progress <= 1.0) {
+            result.progress = progress;
+        } else if (progress > 1.0 && progress <= 100.0) {
+            result.progress = progress / 100.0;
+        }
+        // else: out of range -> -1 (default)
+    }
+
+    return result;
 }
 
 }  // namespace specs
