@@ -164,18 +164,18 @@ check_progress:
     // Progress is read only while Loading
     if (result.state == ReadyState::Loading) {
         if (!ready_spec.contains("progress_field") || !ready_spec["progress_field"].is_string()) {
-            throw SpecError("progress_field missing from ready_spec");
+            return result;  // progress_field missing from ready_spec -> -1
         }
         std::string progress_field = ready_spec["progress_field"].get<std::string>();
 
         if (!status.contains(progress_field)) {
-            throw SpecError("progress_field '" + progress_field + "' missing from status");
+            return result;  // progress_field missing from status -> -1
         }
 
         const json& progress_val = status[progress_field];
 
         if (!progress_val.is_number()) {
-            throw SpecError("progress_field '" + progress_field + "' is not a number");
+            return result;  // not a number -> -1
         }
 
         double progress = progress_val.get<double>();
@@ -184,9 +184,8 @@ check_progress:
             result.progress = progress;
         } else if (progress > 1.0 && progress <= 100.0) {
             result.progress = progress / 100.0;
-        } else {
-            throw SpecError("progress_field '" + progress_field + "' value " + std::to_string(progress) + " out of range");
         }
+        // else: out of range -> -1 (default)
     }
 
     return result;
