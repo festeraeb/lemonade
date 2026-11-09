@@ -15,6 +15,9 @@ class H(BaseHTTPRequestHandler):
         b = json.dumps(obj).encode(); self.send_response(200)
         self.send_header("content-type", "application/json"); self.send_header("content-length", str(len(b))); self.end_headers(); self.wfile.write(b)
     def do_GET(self):
+        if self.path.startswith("/memory"):  # R9: memory by device and tier
+            return self._j({"devices": [{"uuid": "GPU-fake", "bytes": 1048576, "evictable": True}],
+                            "pinned_host": 2048, "remote": 4096, "disk": 8192})
         self._j({"status": "ok"} if self.path.startswith("/health") else {"object": "list", "data": [{"id": "fake", "object": "model", "owned_by": "fake"}]})
     def do_POST(self):
         n = int(self.headers.get("content-length") or 0); self.rfile.read(n)
