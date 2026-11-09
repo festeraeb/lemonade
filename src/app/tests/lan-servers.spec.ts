@@ -28,8 +28,8 @@ async function setup(page: Page) {
     (window as unknown as { api: unknown }).api = {
       isWebApp: true,
       listLanServers: async () => state.rows.map(r => ({ ...r })),
-      setLanServerState: async (id: string, s: Row['state'], url?: string) => {
-        state.calls.push({ id, state: s, url: url ?? null });
+      setLanServerState: async (id: string, s: Row['state'], url?: string, publicKey?: string) => {
+        state.calls.push({ id, state: s, url: url ?? null, ...(publicKey ? { publicKey } : {}) });
         const row = state.rows.find(r => r.id === id);
         if (row) row.state = s;
       },
@@ -65,6 +65,20 @@ test('lists LAN servers with zones and hides ignored ones', async ({ page }) => 
   await expect(panel.getByRole('button', { name: /Show ignored/ })).toHaveCount(0);
   const calls = await page.evaluate(() => (window as unknown as { __lan: { calls: unknown[] } }).__lan.calls);
   expect(calls).toEqual([{ id: 'guest-box', state: 'new', url: null }]);
+});
+
+test('Use saves the server\'s device key from its Nexus status', async ({ page }) => {
+  const key = 'ed25519:f6Y3aCO2va1Ht3WvqmkTo6J_VBcAoWrV5nEM8SOJ4vY';
+  await page.route('http://10.44.0.14:13305/api/v1/nexus/status', route => route.fulfill({
+    contentType: 'application/json',
+    body: JSON.stringify({ available: true, enabled: true, node_id: 'abc', public_key: key }),
+  }));
+  await setup(page);
+  const panel = list(page);
+  await panel.getByRole('group', { name: 'Actions for cesarops4om' }).getByRole('button', { name: 'Use' }).click();
+  await expect(panel.getByText('In use')).toBeVisible();
+  const calls = await page.evaluate(() => (window as unknown as { __lan: { calls: unknown[] } }).__lan.calls);
+  expect(calls).toEqual([{ id: 'cesarops4om', state: 'accepted', url: 'http://10.44.0.14:13305', publicKey: key }]);
 });
 
 test('Ignore hides a server and remembers the choice', async ({ page }) => {
