@@ -24,6 +24,11 @@ specs = {
     "fake-libpath": dict(base, args=["--port", "{port}"], env=dict(base["env"], LD_LIBRARY_PATH="/tmp/evil")),
     "fake-nobinary": {k: v for k, v in dict(base, args=["--port", "{port}"]).items() if k != "binary"},
 }
+# An engine bundle laid out <engine>/bin/<binary> + <engine>/cuda12-libs (our llama.cpp builds): library paths
+# anywhere under <engine>/ are the engine's own, so they are allowed.
+os.makedirs(T + "/engine/bin"); shutil.copy(HERE + "/fake_engine.py", T + "/engine/bin/fake_engine.py"); os.chmod(T + "/engine/bin/fake_engine.py", 0o755)
+specs["fake-bundle"] = dict(base, binary=T + "/engine/bin/fake_engine.py", args=["--port", "{port}"],
+                            env=dict(base["env"], LD_LIBRARY_PATH=T + "/engine/bin:" + T + "/engine/cuda12-libs"))
 for n, s in specs.items():
     json.dump(s, open(f"{T}/adapters/{n}.json", "w"), indent=1)
 json.dump({n: {"checkpoint": f"{n}::{T}/models/model with space.gguf", "labels": ["chat", "custom"], "recipe": "adapter", "size": 0.01}
@@ -68,6 +73,9 @@ try:
     st, chat = call("/api/v1/chat/completions", {"model": "fake-good", "messages": [{"role": "user", "content": "hi"}]})
     check("good spec answers", st == 200 and "fake engine answer" in chat, f"status {st}")
     call("/api/v1/unload", {"model_name": "fake-good"})
+    st, body = call("/api/v1/load", {"model_name": "fake-bundle"})
+    check("bundle library paths under the engine root are allowed", st == 200, f"status {st}: {body[:160]}")
+    call("/api/v1/unload", {"model_name": "fake-bundle"})
     for model, needle in (("fake-preload", "LD_PRELOAD"), ("fake-badph", "{shell}"), ("fake-libpath", "/tmp/evil"), ("fake-nobinary", "binary")):
         st, body = call("/api/v1/load", {"model_name": model})
         check(f"{model} refused naming {needle}", st >= 400 and needle in body, f"status {st}: {body[:160]}")
