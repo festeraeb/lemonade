@@ -182,13 +182,7 @@ std::vector<std::pair<std::string, std::string>> build_env(
                 }
                 parts.push_back(part);
             }
-            // Reconstruct the string from valid parts
-            std::string new_val;
-            for (size_t i = 0; i < parts.size(); ++i) {
-                if (i > 0) new_val += ":";
-                new_val += parts[i];
-            }
-            filled_val = new_val;
+            // Keep filled_val unchanged - validation passed, return original string
         }
 
         result.push_back({name, filled_val});
