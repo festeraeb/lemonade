@@ -6,6 +6,7 @@
 #include "lemon/backends/backend_registry.h"
 #include "lemon/backends/backend_utils.h"
 #include "lemon/server_process.h"
+#include "lemon/system_info.h"
 #include "lemon/utils/aixlog.hpp"
 #include "lemon/utils/http_client.h"
 #include "lemon/utils/path_utils.h"
@@ -152,16 +153,39 @@ void AdapterServer::load(const std::string& model_name, const ModelInfo& model_i
     completion_ = spec.value("completion", true);
     telemetry_path_ = spec.value("telemetry_path", std::string{});
 
-    std::string device = option_text(options, "adapter_device");
-    if (device.empty()) device = spec.value("default_device_index", std::string("0"));
+    std::string device;
+    const std::string requested = option_text(options, "adapter_device");
+    const std::string spec_default = spec.value("default_device_index", std::string{});
+    std::vector<adapter::specs::Gpu> inventory;
+    try {
+        auto sys = create_system_info();
+        for (auto& g : sys->get_nvidia_gpu_devices())
+            if (g.index >= 0) inventory.push_back({g.index, g.uuid});
+        for (auto& g : sys->get_amd_dgpu_devices())
+            if (g.index >= 0) inventory.push_back({g.index, g.uuid});
+    } catch (...) { }
+    std::string gpu_uuids;
+    if (inventory.empty()) {
+        device = requested.empty() ? (spec_default.empty() ? std::string("0") : spec_default) : requested;
+        gpu_uuids = device;
+    } else {
+        try {
+            const auto choice = adapter::specs::choose_device(requested, spec_default, inventory);
+            device = std::to_string(choice.index);
+            gpu_uuids = choice.uuid.empty() ? device : choice.uuid;
+        } catch (const adapter::specs::SpecError& e) {
+            throw std::runtime_error("adapter " + name + ": " + std::string(e.what()));
+        }
+    }
 
     port_ = choose_port();
     if (port_ == 0) {
         throw std::runtime_error("adapter: failed to allocate a port for " + name);
     }
-    const std::map<std::string, std::string> subs = {
+    std::map<std::string, std::string> subs = {
         {"{model}", model_path}, {"{model_path}", model_path}, {"{port}", std::to_string(port_)}, {"{device}", device},
         {"{spec_dir}", spec_dir.string()}};
+    subs["{gpu_uuids}"] = gpu_uuids;
 
     std::vector<std::string> args;
     const std::string override_args = option_text(options, "adapter_args");
