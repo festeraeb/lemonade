@@ -74,7 +74,6 @@ SpecCheck check_spec(const json& spec) {
     if (!spec.contains("binary") || !spec["binary"].is_string() || spec["binary"].get<std::string>().empty()) {
         result.level_cap = 0;
         result.problems.emplace_back("binary missing or empty");
-        return result;
     }
 
     // Required: args (array) OR args_template (string)
@@ -84,7 +83,6 @@ SpecCheck check_spec(const json& spec) {
     if (!has_args && !has_args_template) {
         result.level_cap = 0;
         result.problems.emplace_back("args or args_template missing");
-        return result;
     }
 
     // Validate args array elements are strings
@@ -93,7 +91,7 @@ SpecCheck check_spec(const json& spec) {
             if (!e.is_string()) {
                 result.level_cap = 0;
                 result.problems.emplace_back("args must be array of strings");
-                return result;
+                break;
             }
         }
     }
