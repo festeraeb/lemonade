@@ -49,8 +49,82 @@ std::vector<std::string> build_argv(const json&, const std::map<std::string, std
 }
 
 std::vector<std::pair<std::string, std::string>> build_env(
-    const json&, const std::map<std::string, std::string>&, const std::vector<std::string>&) {
-    throw std::logic_error("AP3 build_env not built yet");
+    const json& env, const std::map<std::string, std::string>& values, const std::vector<std::string>& allowed_dirs) {
+    // Contract: "env is not an object (null or absent is fine: empty result)"
+    if (!env.is_object()) return {};
+
+    std::vector<std::pair<std::string, std::string>> result;
+    // Iterate over env.items() in key order (JSON object preserves insertion order)
+    for (const auto& [name, value] : env.items()) {
+        // Contract: "a value is not a string"
+        if (!value.is_string()) {
+            throw SpecError("environment value for '" + name + "' is not a string");
+        }
+        std::string val_str = value.get<std::string>();
+
+        // Contract: "a name is not allowed (named in the message)"
+        bool allowed = false;
+        for (const auto& p : kEnvPrefixes) {
+            if (name.size() >= p.size() && name.substr(0, p.size()) == p) {
+                allowed = true;
+                break;
+            }
+        }
+        if (!allowed) {
+            for (const auto& n : kEnvNames) {
+                if (name == n) {
+                    allowed = true;
+                    break;
+                }
+            }
+        }
+        if (!allowed) {
+            throw SpecError("environment variable name '" + name + "' is not allowed");
+        }
+
+        // Fill placeholders
+        std::string filled_val = fill(val_str, values);
+
+        // Special handling for LD_LIBRARY_PATH
+        if (name == "LD_LIBRARY_PATH") {
+            std::vector<std::string> parts;
+            std::istringstream iss(filled_val);
+            std::string part;
+            while (std::getline(iss, part, ':')) {
+                if (part.empty()) continue;
+                // "an entry containing ".." is refused"
+                if (part.find("..") != std::string::npos) {
+                    throw SpecError("LD_LIBRARY_PATH entry '" + part + "' contains '..'");
+                }
+                // "not absolute"
+                if (part.empty() || part[0] != '/') {
+                    throw SpecError("LD_LIBRARY_PATH entry '" + part + "' is not absolute");
+                }
+                // "not inside one of allowed_dirs"
+                bool ok = false;
+                for (const auto& dir : allowed_dirs) {
+                    if (part == dir || (part.size() > dir.size() && part.compare(0, dir.size() + 1, dir + "/") == 0)) {
+                        ok = true;
+                        break;
+                    }
+                }
+                if (!ok) {
+                    throw SpecError("LD_LIBRARY_PATH entry '" + part + "' not inside allowed directory");
+                }
+                parts.push_back(part);
+            }
+            // Reconstruct the string from valid parts
+            std::string new_val;
+            for (size_t i = 0; i < parts.size(); ++i) {
+                if (i > 0) new_val += ":";
+                new_val += parts[i];
+            }
+            filled_val = new_val;
+        }
+
+        result.push_back({name, filled_val});
+    }
+    return result;
 }
 
 DeviceChoice choose_device(const std::string&, const std::string&, const std::vector<Gpu>&) {
