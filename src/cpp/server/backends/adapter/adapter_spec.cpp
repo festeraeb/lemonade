@@ -5,7 +5,9 @@
 #include <map>
 #include <regex>
 #include <sstream>
+#include <string>
 #include <unordered_set>
+#include <vector>
 
 namespace lemon {
 namespace backends {
@@ -187,8 +189,45 @@ std::vector<std::pair<std::string, std::string>> build_env(
     return result;
 }
 
-DeviceChoice choose_device(const std::string&, const std::string&, const std::vector<Gpu>&) {
-    throw std::logic_error("AP4 choose_device not built yet");
+DeviceChoice choose_device(const std::string& requested, const std::string& spec_default, const std::vector<Gpu>& inventory) {
+    // Helper to trim leading/trailing whitespace
+    auto trim = [](std::string s) -> std::string {
+        size_t start = s.find_first_not_of(" \t\r\n");
+        if (start == std::string::npos) return "";
+        size_t end = s.find_last_not_of(" \t\r\n");
+        return s.substr(start, end - start + 1);
+    };
+
+    std::string req = trim(requested);
+    std::string def = trim(spec_default);
+
+    // Fallback chain: requested -> spec_default -> "0"
+    if (req.empty()) req = def;
+    if (req.empty()) req = "0";
+
+    // Check if input is a decimal index
+    bool is_digit = std::all_of(req.begin(), req.end(), ::isdigit);
+    if (is_digit) {
+        int idx = std::stoi(req);
+        if (idx < 0 || static_cast<size_t>(idx) >= inventory.size()) {
+            throw SpecError("Invalid device index: " + req);
+        }
+        return DeviceChoice{idx, inventory[idx].uuid};
+    }
+
+    // Check if input is a UUID (case-insensitive match)
+    std::string lower_req = req;
+    std::transform(lower_req.begin(), lower_req.end(), lower_req.begin(), ::tolower);
+
+    for (const auto& g : inventory) {
+        std::string lower_guuid = g.uuid;
+        std::transform(lower_guuid.begin(), lower_guuid.end(), lower_guuid.begin(), ::tolower);
+        if (lower_req == lower_guuid) {
+            return DeviceChoice{g.index, g.uuid};
+        }
+    }
+
+    throw SpecError("Invalid device uuid: " + req);
 }
 
 SpecCheck check_spec(const json& spec) {
