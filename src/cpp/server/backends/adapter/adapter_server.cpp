@@ -59,7 +59,6 @@ namespace {
 // The pure spec helpers live in adapter_spec.{h,cpp}, tested without lemond (test/cpp/adapter_spec/).
 using adapter::specs::contains;
 using adapter::specs::fill;
-using adapter::specs::kSpecVersion;
 using adapter::specs::split_args;
 using adapter::specs::valid_spec_name;
 
@@ -132,11 +131,15 @@ void AdapterServer::load(const std::string& model_name, const ModelInfo& model_i
     fs::path spec_dir;
     const json spec = read_spec(name, spec_dir);
     spec_name_ = name;
-    const int version = spec.value("spec_version", 1);
-    if (version > kSpecVersion) {
-        throw std::runtime_error("adapter " + name + ": spec_version " + std::to_string(version) +
-                                 " is newer than this Lemonade reads (" + std::to_string(kSpecVersion) +
-                                 "); update Lemonade or run the engine without control");
+    const auto checked = adapter::specs::check_spec(spec);
+    if (checked.level_cap == 0) {
+        std::string problems;
+        for (size_t i = 0; i < checked.problems.size(); ++i) {
+            if (i > 0) problems += "; ";
+            problems += checked.problems[i];
+        }
+        throw std::runtime_error("adapter " + name + ": the spec cannot be used (" + problems +
+                                 "); run the engine without control instead");
     }
 
     const json ready = spec.value("ready", json::object());
@@ -164,26 +167,40 @@ void AdapterServer::load(const std::string& model_name, const ModelInfo& model_i
     const std::string override_args = option_text(options, "adapter_args");
     if (!override_args.empty()) {
         args = split_args(fill(override_args, subs));
-    } else if (spec.contains("args") && spec["args"].is_array()) {
-        for (const auto& a : spec["args"]) args.push_back(fill(a.get<std::string>(), subs));
     } else {
-        args = split_args(fill(spec.value("args_template", std::string{}), subs));
+        try {
+            args = adapter::specs::build_argv(spec, subs);
+        } catch (const adapter::specs::SpecError& e) {
+            throw std::runtime_error("adapter " + name + ": " + std::string(e.what()));
+        }
     }
 
     ServerCommand command;
     command.program = resolve_binary(fill(spec.value("binary", std::string{}), subs), spec_dir);
     command.args = std::move(args);
-    const json env = spec.value("env", json::object());   // a named copy: items() must not outlive it
-    for (const auto& [k, v] : env.items()) {
-        command.env.emplace_back(k, fill(v.get<std::string>(), subs));
+    const json env = spec.value("env", json::object());
+    std::vector<std::string> allowed_dirs = {spec_dir.string()};
+    if (fs::path(command.program).is_absolute()) {
+        allowed_dirs.push_back(fs::path(command.program).parent_path().string());
+    }
+    try {
+        for (auto& [k, v] : adapter::specs::build_env(env, subs, allowed_dirs)) {
+            command.env.emplace_back(k, v);
+        }
+    } catch (const adapter::specs::SpecError& e) {
+        throw std::runtime_error("adapter " + name + ": " + std::string(e.what()));
     }
     // Opt-in telemetry is declared in the spec, never hidden in its arguments: its env applies only when the
     // spec enables it or the user sets adapter_telemetry=on for this model.
     const json telemetry = spec.value("telemetry", json::object());
     if (telemetry.value("enabled", false) || option_text(options, "adapter_telemetry") == "on") {
         const json tenv = telemetry.value("env", json::object());
-        for (const auto& [k, v] : tenv.items()) {
-            command.env.emplace_back(k, fill(v.get<std::string>(), subs));
+        try {
+            for (auto& [k, v] : adapter::specs::build_env(tenv, subs, allowed_dirs)) {
+                command.env.emplace_back(k, v);
+            }
+        } catch (const adapter::specs::SpecError& e) {
+            throw std::runtime_error("adapter " + name + ": " + std::string(e.what()));
         }
         LOG(INFO, "Adapter") << name << ": telemetry on (" << telemetry.value("what", std::string("declared in the spec")) << ")" << std::endl;
     }
