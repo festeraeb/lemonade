@@ -152,6 +152,7 @@ void AdapterServer::load(const std::string& model_name, const ModelInfo& model_i
     const std::string owned_by = spec.value("identity", json::object()).value("owned_by", std::string{});
     completion_ = spec.value("completion", true);
     telemetry_path_ = spec.value("telemetry_path", std::string{});
+    memory_path_ = spec.value("memory_path", std::string{});
 
     std::string device;
     const std::string requested = option_text(options, "adapter_device");
@@ -379,12 +380,22 @@ json AdapterServer::completion(const json& request) {
 }
 
 std::map<std::string, nlohmann::json> AdapterServer::get_additional_telemetry() {
-    if (get_backend_port() <= 0 || telemetry_path_.empty()) return {};
+    if (get_backend_port() <= 0 || (telemetry_path_.empty() && memory_path_.empty())) return {};
     std::map<std::string, nlohmann::json> out;
-    try {
-        out["adapter_stats"] = forward_get_request(telemetry_path_, 2);
-    } catch (...) {
-        out["adapter_stats"] = nullptr;
+    if (!telemetry_path_.empty()) {
+        try {
+            out["adapter_stats"] = forward_get_request(telemetry_path_, 2);
+        } catch (...) {
+            out["adapter_stats"] = nullptr;
+        }
+    }
+    // R9: the engine's memory by device and tier, plus the one number lemond's evictor would use.
+    if (!memory_path_.empty()) {
+        try {
+            out["adapter_memory"] = adapter::specs::memory_telemetry(forward_get_request(memory_path_, 2));
+        } catch (const std::exception& e) {
+            out["adapter_memory"] = nlohmann::json{{"error", e.what()}};
+        }
     }
     return out;
 }
