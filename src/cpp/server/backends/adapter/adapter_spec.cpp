@@ -58,7 +58,7 @@ std::vector<std::pair<std::string, std::string>> build_env(
 
 DeviceChoice choose_device(const std::string& requested, const std::string& spec_default, const std::vector<Gpu>& inventory) {
     // Helper to trim leading/trailing whitespace
-    auto trim = [](std::string s) {
+    auto trim = [](std::string s) -> std::string {
         size_t start = s.find_first_not_of(" \t\r\n");
         if (start == std::string::npos) return "";
         size_t end = s.find_last_not_of(" \t\r\n");
