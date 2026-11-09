@@ -92,9 +92,11 @@ std::vector<std::string> build_argv(const json& spec, const std::map<std::string
             throw SpecError("args_template");
         }
         std::string tmpl = spec["args_template"].get<std::string>();
-        std::vector<std::string> tokens = split_args(tmpl);
+        // Fill placeholders first, then split on whitespace
+        std::string filled = replace_placeholders(tmpl);
+        std::vector<std::string> tokens = split_args(filled);
         for (const auto& token : tokens) {
-            argv.push_back(replace_placeholders(token));
+            argv.push_back(token);
         }
     }
 
