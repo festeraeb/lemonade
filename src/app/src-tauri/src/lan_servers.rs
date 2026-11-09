@@ -88,6 +88,10 @@ pub(crate) struct SavedChoice {
     pub url: String,
     #[serde(default)]
     pub updated: u64,
+    /// The server's lemond device key (`ed25519:<base64>`) as its `/api/v1/nexus/status` reported it when the user
+    /// chose, so a trust registry can record the choice against the key. Empty when unknown; left out of the file then.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub public_key: String,
 }
 
 #[derive(Debug, Default, Serialize, Deserialize)]
@@ -270,10 +274,25 @@ pub(crate) fn apply_choice(
         }
         Some(choice) => {
             let updated = SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
-            servers.insert(id.to_string(), SavedChoice { choice, hostname: hostname.to_string(), url: url.to_string(), updated });
+            servers.insert(id.to_string(), SavedChoice { choice, hostname: hostname.to_string(), url: url.to_string(), updated, public_key: String::new() });
         }
     }
     Ok(())
+}
+
+/// apply_choice that also records the server's device key. `public_key` None or empty keeps the key already saved
+/// for that id (a later choice made without reading the status must not forget it); a non-empty key replaces it.
+/// "new" removes the entry, key and all. Every other rule is apply_choice's.
+pub(crate) fn apply_choice_with_key(
+    servers: &mut BTreeMap<String, SavedChoice>,
+    id: &str,
+    state: &str,
+    hostname: &str,
+    url: &str,
+    public_key: Option<&str>,
+) -> Result<(), String> {
+    let _ = (servers, id, state, hostname, url, public_key);
+    Err("N2b apply_choice_with_key not built yet".into())
 }
 
 pub(crate) fn set_choice(id: &str, state: &str, url: Option<&str>) -> Result<(), String> {
@@ -393,3 +412,7 @@ mod tests {
         assert!(empty.servers.is_empty());
     }
 }
+
+#[cfg(test)]
+#[path = "lan_servers_key_tests.rs"]
+mod key_tests;
