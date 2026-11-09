@@ -32,6 +32,7 @@ specs["fake-bundle"] = dict(base, binary=T + "/engine/bin/fake_engine.py", args=
 # R11: {gpu_uuids} carries the card's UUID; a UUID request resolves to its index for {device}.
 specs["fake-uuid"] = dict(base, args=["--port", "{port}", "--index", "{device}"],
                           env=dict(base["env"], CUDA_VISIBLE_DEVICES="{gpu_uuids}", LEMONADE_ENGINE_RECORD=T + "/record-uuid.json"))
+specs["fake-memory"] = dict(base, args=["--port", "{port}"], memory_path="/memory")
 for n, s in specs.items():
     json.dump(s, open(f"{T}/adapters/{n}.json", "w"), indent=1)
 json.dump({n: {"checkpoint": f"{n}::{T}/models/model with space.gguf", "labels": ["chat", "custom"], "recipe": "adapter", "size": 0.01}
@@ -79,6 +80,30 @@ try:
     st, body = call("/api/v1/load", {"model_name": "fake-bundle"})
     check("bundle library paths under the engine root are allowed", st == 200, f"status {st}: {body[:160]}")
     call("/api/v1/unload", {"model_name": "fake-bundle"})
+    # R9: the engine's memory report reaches lemond's stats, with the evictor's one number
+    st, body = call("/api/v1/load", {"model_name": "fake-memory"})
+    call("/api/v1/chat/completions", {"model": "fake-memory", "messages": [{"role": "user", "content": "hi"}]})
+    st, stats = call("/api/v1/stats")
+    mem = {}
+    try:
+        def find(o):
+            if isinstance(o, dict):
+                if "adapter_memory" in o: return o["adapter_memory"]
+                for v in o.values():
+                    r = find(v)
+                    if r is not None: return r
+            if isinstance(o, list):
+                for v in o:
+                    r = find(v)
+                    if r is not None: return r
+            return None
+        mem = find(json.loads(stats)) or {}
+    except ValueError:
+        pass
+    check("stats carry the engine's memory report", isinstance(mem, dict) and mem.get("local_bytes") == 1048576 + 2048 and
+          mem.get("remote") == 4096 and mem.get("disk") == 8192 and (mem.get("devices") or [{}])[0].get("uuid") == "GPU-fake",
+          f"adapter_memory {mem}")
+    call("/api/v1/unload", {"model_name": "fake-memory"})
     # Cards on this host, as nvidia-smi numbers them (the R11 checks need at least one NVIDIA card).
     try:
         smi = subprocess.run(["nvidia-smi", "--query-gpu=index,uuid", "--format=csv,noheader"], capture_output=True, text=True, timeout=30).stdout
