@@ -29,6 +29,9 @@ specs = {
 os.makedirs(T + "/engine/bin"); shutil.copy(HERE + "/fake_engine.py", T + "/engine/bin/fake_engine.py"); os.chmod(T + "/engine/bin/fake_engine.py", 0o755)
 specs["fake-bundle"] = dict(base, binary=T + "/engine/bin/fake_engine.py", args=["--port", "{port}"],
                             env=dict(base["env"], LD_LIBRARY_PATH=T + "/engine/bin:" + T + "/engine/cuda12-libs"))
+# R11: {gpu_uuids} carries the card's UUID; a UUID request resolves to its index for {device}.
+specs["fake-uuid"] = dict(base, args=["--port", "{port}", "--index", "{device}"],
+                          env=dict(base["env"], CUDA_VISIBLE_DEVICES="{gpu_uuids}", LEMONADE_ENGINE_RECORD=T + "/record-uuid.json"))
 for n, s in specs.items():
     json.dump(s, open(f"{T}/adapters/{n}.json", "w"), indent=1)
 json.dump({n: {"checkpoint": f"{n}::{T}/models/model with space.gguf", "labels": ["chat", "custom"], "recipe": "adapter", "size": 0.01}
@@ -76,6 +79,30 @@ try:
     st, body = call("/api/v1/load", {"model_name": "fake-bundle"})
     check("bundle library paths under the engine root are allowed", st == 200, f"status {st}: {body[:160]}")
     call("/api/v1/unload", {"model_name": "fake-bundle"})
+    # Cards on this host, as nvidia-smi numbers them (the R11 checks need at least one NVIDIA card).
+    try:
+        smi = subprocess.run(["nvidia-smi", "--query-gpu=index,uuid", "--format=csv,noheader"], capture_output=True, text=True, timeout=30).stdout
+        cards = [tuple(x.strip() for x in line.split(",")) for line in smi.strip().splitlines() if "," in line]
+    except OSError:
+        cards = []
+    if cards:
+        idx, uuid = cards[-1]
+        st, body = call("/api/v1/load", {"model_name": "fake-uuid", "adapter_device": idx})
+        r = json.load(open(T + "/record-uuid.json")) if os.path.exists(T + "/record-uuid.json") else {}
+        check("an index request fills {gpu_uuids} with that card's UUID", st == 200 and r.get("env", {}).get("CUDA_VISIBLE_DEVICES") == uuid,
+              f"status {st}, env {r.get('env')}, want {uuid}")
+        call("/api/v1/unload", {"model_name": "fake-uuid"})
+        if os.path.exists(T + "/record-uuid.json"): os.remove(T + "/record-uuid.json")
+        st, body = call("/api/v1/load", {"model_name": "fake-uuid", "adapter_device": uuid.lower()})
+        r = json.load(open(T + "/record-uuid.json")) if os.path.exists(T + "/record-uuid.json") else {}
+        argv = r.get("argv", [])
+        check("a UUID request fills {device} with that card's index", st == 200 and argv[-2:] == ["--index", idx],
+              f"status {st}, argv {argv}, want index {idx}")
+        call("/api/v1/unload", {"model_name": "fake-uuid"})
+        st, body = call("/api/v1/load", {"model_name": "fake-uuid", "adapter_device": "GPU-00000000-0000-0000-0000-000000000000"})
+        check("an unknown UUID is refused naming it", st >= 400 and "GPU-00000000" in body, f"status {st}: {body[:160]}")
+    else:
+        print("SKIP R11 checks: no NVIDIA card on this host")
     for model, needle in (("fake-preload", "LD_PRELOAD"), ("fake-badph", "{shell}"), ("fake-libpath", "/tmp/evil"), ("fake-nobinary", "binary")):
         st, body = call("/api/v1/load", {"model_name": model})
         check(f"{model} refused naming {needle}", st >= 400 and needle in body, f"status {st}: {body[:160]}")
