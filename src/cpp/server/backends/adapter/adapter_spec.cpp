@@ -1,5 +1,6 @@
 #include "adapter_spec.h"
 
+#include <algorithm>
 #include <cctype>
 #include <sstream>
 
@@ -57,8 +58,121 @@ DeviceChoice choose_device(const std::string&, const std::string&, const std::ve
     throw std::logic_error("AP4 choose_device not built yet");
 }
 
-SpecCheck check_spec(const json&) {
-    throw std::logic_error("AP5 check_spec not built yet");
+SpecCheck check_spec(const json& spec) {
+    SpecCheck result;
+    result.level_cap = 4;
+    result.problems.clear();
+
+    // Not a JSON object
+    if (!spec.is_object()) {
+        result.level_cap = 0;
+        result.problems.emplace_back("spec is not a JSON object");
+        return result;
+    }
+
+    // Required: binary (non-empty string)
+    if (!spec.contains("binary") || !spec["binary"].is_string() || spec["binary"].get<std::string>().empty()) {
+        result.level_cap = 0;
+        result.problems.emplace_back("binary missing or empty");
+    }
+
+    // Required: args (array) OR args_template (string)
+    bool has_args = spec.contains("args") && spec["args"].is_array();
+    bool has_args_template = spec.contains("args_template") && spec["args_template"].is_string();
+
+    if (!has_args && !has_args_template) {
+        result.level_cap = 0;
+        result.problems.emplace_back("args or args_template missing");
+    }
+
+    // Validate args array elements are strings
+    if (has_args) {
+        for (const auto& e : spec["args"]) {
+            if (!e.is_string()) {
+                result.level_cap = 0;
+                result.problems.emplace_back("args must be array of strings");
+                break;
+            }
+        }
+    }
+
+    // Optional fields validation - collect all problems, don't return early
+    if (spec.contains("spec_version")) {
+        if (!spec["spec_version"].is_number_integer() || spec["spec_version"].get<int>() < 1) {
+            result.level_cap = 0;
+            result.problems.emplace_back("spec_version must be integer >= 1");
+        } else if (spec["spec_version"].get<int>() > kSpecVersion) {
+            result.level_cap = 0;
+            result.problems.emplace_back("spec_version must be <= " + std::to_string(kSpecVersion));
+        }
+    }
+
+    if (spec.contains("env")) {
+        if (!spec["env"].is_object()) {
+            result.level_cap = 0;
+            result.problems.emplace_back("env must be object");
+        }
+    }
+
+    if (spec.contains("ready")) {
+        if (!spec["ready"].is_object()) {
+            result.level_cap = 0;
+            result.problems.emplace_back("ready must be object");
+        }
+    }
+
+    if (spec.contains("telemetry")) {
+        if (!spec["telemetry"].is_object()) {
+            result.level_cap = 0;
+            result.problems.emplace_back("telemetry must be object");
+        }
+    }
+
+    if (spec.contains("telemetry_path")) {
+        if (!spec["telemetry_path"].is_string()) {
+            result.level_cap = 0;
+            result.problems.emplace_back("telemetry_path must be string");
+        }
+    }
+
+    if (spec.contains("memory_path")) {
+        if (!spec["memory_path"].is_string()) {
+            result.level_cap = 0;
+            result.problems.emplace_back("memory_path must be string");
+        }
+    }
+
+    if (spec.contains("budget_path")) {
+        if (!spec["budget_path"].is_string()) {
+            result.level_cap = 0;
+            result.problems.emplace_back("budget_path must be string");
+        }
+    }
+
+    if (spec.contains("binary_sha256")) {
+        if (!spec["binary_sha256"].is_string()) {
+            result.level_cap = 0;
+            result.problems.emplace_back("binary_sha256 must be string");
+        } else {
+            std::string h = spec["binary_sha256"].get<std::string>();
+            if (h.size() != 64 || !std::all_of(h.begin(), h.end(), [](char c) {
+                return std::isxdigit(static_cast<unsigned char>(c));
+            })) {
+                result.level_cap = 0;
+                result.problems.emplace_back("binary_sha256 must be 64 hex chars");
+            }
+        }
+    }
+
+    if (spec.contains("default_device_index")) {
+        if (!spec["default_device_index"].is_string()) {
+            result.level_cap = 0;
+            result.problems.emplace_back("default_device_index must be string");
+        }
+    }
+
+    // Unknown fields are ignored
+    return result;
 }
 
 MemoryReport parse_memory_report(const json&) {
