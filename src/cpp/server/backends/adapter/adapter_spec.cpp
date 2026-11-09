@@ -111,7 +111,7 @@ MemoryReport parse_memory_report(const json& body) {
 
     uint64_t pinned_host = 0;
     if (body.contains("pinned_host")) {
-        const auto& val = body["pinned_host"];
+        const auto& val = body.value("pinned_host", json(0));
         if (!val.is_number_integer() || val.get<int64_t>() < 0) {
             throw SpecError("pinned_host must be a non-negative integer");
         }
@@ -120,7 +120,7 @@ MemoryReport parse_memory_report(const json& body) {
 
     uint64_t remote = 0;
     if (body.contains("remote")) {
-        const auto& val = body["remote"];
+        const auto& val = body.value("remote", json(0));
         if (!val.is_number_integer() || val.get<int64_t>() < 0) {
             throw SpecError("remote must be a non-negative integer");
         }
@@ -129,7 +129,7 @@ MemoryReport parse_memory_report(const json& body) {
 
     uint64_t disk = 0;
     if (body.contains("disk")) {
-        const auto& val = body["disk"];
+        const auto& val = body.value("disk", json(0));
         if (!val.is_number_integer() || val.get<int64_t>() < 0) {
             throw SpecError("disk must be a non-negative integer");
         }
