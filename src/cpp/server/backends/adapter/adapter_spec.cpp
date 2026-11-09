@@ -51,8 +51,8 @@ std::vector<std::string> build_argv(const json&, const std::map<std::string, std
 std::vector<std::pair<std::string, std::string>> build_env(
     const json& env, const std::map<std::string, std::string>& values, const std::vector<std::string>& allowed_dirs) {
     // Contract: "env is not an object (null or absent is fine: empty result)"
-    if (env.is_null() || !env.is_object()) {
-        if (env.is_null() || env.is_discarded()) return {};
+    if (env.is_null() || env.is_discarded()) return {};
+    if (!env.is_object()) {
         throw SpecError("env is not an object");
     }
 
