@@ -73,12 +73,23 @@ uint64_t device_bytes(const MemoryReport&, const std::string&) {
     throw std::logic_error("AP6 device_bytes not built yet");
 }
 
-json budget_request(const std::string&, int64_t) {
-    throw std::logic_error("AP7 budget_request not built yet");
+json budget_request(const std::string& uuid, int64_t mib) {
+    if (uuid.empty()) throw SpecError("empty uuid");
+    if (mib < 0) throw SpecError("negative mib");
+    return BudgetResult{true, static_cast<uint64_t>(mib), ""};
 }
 
-BudgetResult parse_budget_reply(const json&) {
-    throw std::logic_error("AP7 parse_budget_reply not built yet");
+BudgetResult parse_budget_reply(const json& body) {
+    if (!body.is_object()) throw SpecError("body not object");
+    if (!body.contains("accepted")) throw SpecError("missing accepted");
+    if (!body["accepted"].is_boolean()) throw SpecError("accepted not bool");
+    bool accepted = body["accepted"].get<bool>();
+    if (accepted) {
+        if (!body.contains("now_bytes")) throw SpecError("now_bytes missing");
+        if (!body["now_bytes"].is_number_unsigned()) throw SpecError("now_bytes negative");
+        return BudgetResult{accepted, body["now_bytes"].get<uint64_t>(), ""};
+    }
+    return BudgetResult{accepted, 0, body.value("reason", "")};
 }
 
 Readiness ready_state(const json&, const json&) {
