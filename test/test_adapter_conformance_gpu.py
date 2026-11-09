@@ -79,6 +79,10 @@ class GpuMib(unittest.TestCase):
         ac._run = runner({"all-smi": subprocess.TimeoutExpired("all-smi", 30), "nvidia-smi": NVIDIA_CSV})
         self.assertEqual(ac.gpu_mib(), {0: 259, 1: 2183})
 
+    def test_blank_and_malformed_nvidia_smi_lines_are_skipped(self):
+        ac._run = runner({"nvidia-smi": "0, 259\n\nNo devices were found on bus 3\n1, 2183\n"})
+        self.assertEqual(ac.gpu_mib(), {0: 259, 1: 2183})
+
     def test_no_tool_gives_an_empty_reading(self):
         ac._run = runner({})
         self.assertEqual(ac.gpu_mib(), {})
