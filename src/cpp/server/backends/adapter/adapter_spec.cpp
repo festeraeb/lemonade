@@ -591,6 +591,16 @@ check_progress:
     return result;
 }
 
+// ---- not built yet: forge jobs AP10, AP11 ----
+
+json memory_telemetry(const json&) {
+    throw std::logic_error("AP10 memory_telemetry not built yet");
+}
+
+DeviceValues device_values(const std::string&, const std::string&, const std::vector<Gpu>&) {
+    throw std::logic_error("AP11 device_values not built yet");
+}
+
 }  // namespace specs
 }  // namespace adapter
 }  // namespace backends

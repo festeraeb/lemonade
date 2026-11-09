@@ -96,6 +96,17 @@ struct DeviceChoice {
 // does not fit an int, or the text is neither. Leading/trailing spaces ignored.
 DeviceChoice choose_device(const std::string& requested, const std::string& spec_default, const std::vector<Gpu>& inventory);
 
+// AP11 (R11): the values of the {device} and {gpu_uuids} placeholders.
+struct DeviceValues {
+    std::string device;     // the card's index as decimal text
+    std::string gpu_uuids;  // the card's uuid, or the index text when the card has no uuid
+};
+// With an empty inventory (lemond found no card list on this host) the old rule holds: device is
+// `requested`, else `spec_default`, else "0" (no trimming, no checking), and gpu_uuids = device.
+// Otherwise choose_device(requested, spec_default, inventory) decides and its SpecError propagates:
+// device = std::to_string(choice.index), gpu_uuids = choice.uuid, or device when choice.uuid is empty.
+DeviceValues device_values(const std::string& requested, const std::string& spec_default, const std::vector<Gpu>& inventory);
+
 // ---- AP5 (R16): is this a spec we can run --------------------------------------------------
 
 struct SpecCheck {
@@ -137,6 +148,12 @@ MemoryReport parse_memory_report(const json& body);
 uint64_t local_bytes(const MemoryReport& report);
 // Bytes on the device with this uuid (case-insensitive), 0 when absent.
 uint64_t device_bytes(const MemoryReport& report, const std::string& uuid);
+
+// AP10 (R9): the "adapter_memory" object lemond's stats show for an engine's memory answer:
+//   {"devices": [{"uuid": "..", "bytes": N, "evictable": bool}, ...], "pinned_host": N, "remote": N,
+//    "disk": N, "local_bytes": N}   (local_bytes is local_bytes(report))
+// When the answer does not parse (parse_memory_report throws), {"error": "<its message>"}. Never throws.
+json memory_telemetry(const json& body);
 
 // ---- AP7 (R10): shrink instead of unload -----------------------------------------------------
 
