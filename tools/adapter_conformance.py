@@ -18,6 +18,7 @@ spec claims (a downgrade, not a failure). Level 0 needs no test: the engine can 
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import subprocess
@@ -33,6 +34,35 @@ def call(base: str, path: str, body: dict | None = None, timeout: int = 1900) ->
                                  headers={"content-type": "application/json"})
     with urllib.request.urlopen(req, timeout=timeout) as r:
         return json.loads(r.read() or b"{}")
+
+
+def reference_check(base: str, model: str, ref: dict) -> tuple[bool, str]:
+    if not isinstance(ref.get('prompt'), str) or not ref['prompt']:
+        return (False, 'reference: prompt must be a non-empty string')
+    if not isinstance(ref.get('max_tokens'), int) or ref['max_tokens'] < 1:
+        return (False, 'reference: max_tokens must be an int >= 1')
+    sha = ref.get('sha256', '')
+    if not isinstance(sha, str) or len(sha) != 64 or not all(c in '0123456789abcdefABCDEF' for c in sha):
+        return (False, 'reference: sha256 must be exactly 64 hex characters')
+
+    body = {'model': model, 'max_tokens': ref['max_tokens'], 'temperature': 0,
+            'messages': [{'role': 'user', 'content': ref['prompt']}]}
+    try:
+        reply = call(base, '/api/v1/chat/completions', body)
+    except Exception as e:
+        return (False, f'reference call failed: {e}')
+
+    try:
+        text = reply['choices'][0]['message']['content']
+    except (KeyError, IndexError, TypeError):
+        return (False, 'reference: no answer text')
+
+    if not isinstance(text, str):
+        return (False, 'reference: no answer text')
+
+    got = hashlib.sha256(text.encode('utf-8')).hexdigest()
+    want = ref['sha256'].lower()
+    return (got == want, f'reference: expected {want[:12]} got {got[:12]}')
 
 
 def loaded(base: str) -> list[str]:
