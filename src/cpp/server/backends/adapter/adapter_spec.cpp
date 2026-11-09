@@ -98,12 +98,11 @@ SpecCheck check_spec(const json& spec) {
         }
     }
 
-    // Optional fields validation
+    // Optional fields validation - collect all problems, don't return early
     if (spec.contains("spec_version")) {
         if (!spec["spec_version"].is_number_integer() || spec["spec_version"].get<int>() < 1) {
             result.level_cap = 0;
             result.problems.emplace_back("spec_version must be integer >= 1");
-            return result;
         }
     }
 
@@ -111,7 +110,6 @@ SpecCheck check_spec(const json& spec) {
         if (!spec["env"].is_object()) {
             result.level_cap = 0;
             result.problems.emplace_back("env must be object");
-            return result;
         }
     }
 
@@ -119,7 +117,6 @@ SpecCheck check_spec(const json& spec) {
         if (!spec["ready"].is_object()) {
             result.level_cap = 0;
             result.problems.emplace_back("ready must be object");
-            return result;
         }
     }
 
@@ -127,7 +124,6 @@ SpecCheck check_spec(const json& spec) {
         if (!spec["telemetry"].is_object()) {
             result.level_cap = 0;
             result.problems.emplace_back("telemetry must be object");
-            return result;
         }
     }
 
@@ -135,7 +131,6 @@ SpecCheck check_spec(const json& spec) {
         if (!spec["telemetry_path"].is_string()) {
             result.level_cap = 0;
             result.problems.emplace_back("telemetry_path must be string");
-            return result;
         }
     }
 
@@ -143,7 +138,6 @@ SpecCheck check_spec(const json& spec) {
         if (!spec["memory_path"].is_string()) {
             result.level_cap = 0;
             result.problems.emplace_back("memory_path must be string");
-            return result;
         }
     }
 
@@ -151,7 +145,6 @@ SpecCheck check_spec(const json& spec) {
         if (!spec["budget_path"].is_string()) {
             result.level_cap = 0;
             result.problems.emplace_back("budget_path must be string");
-            return result;
         }
     }
 
@@ -159,15 +152,14 @@ SpecCheck check_spec(const json& spec) {
         if (!spec["binary_sha256"].is_string()) {
             result.level_cap = 0;
             result.problems.emplace_back("binary_sha256 must be string");
-            return result;
-        }
-        std::string h = spec["binary_sha256"].get<std::string>();
-        if (h.size() != 64 || !std::all_of(h.begin(), h.end(), [](char c) {
-            return std::isxdigit(static_cast<unsigned char>(c));
-        })) {
-            result.level_cap = 0;
-            result.problems.emplace_back("binary_sha256 must be 64 hex chars");
-            return result;
+        } else {
+            std::string h = spec["binary_sha256"].get<std::string>();
+            if (h.size() != 64 || !std::all_of(h.begin(), h.end(), [](char c) {
+                return std::isxdigit(static_cast<unsigned char>(c));
+            })) {
+                result.level_cap = 0;
+                result.problems.emplace_back("binary_sha256 must be 64 hex chars");
+            }
         }
     }
 
@@ -175,7 +167,6 @@ SpecCheck check_spec(const json& spec) {
         if (!spec["default_device_index"].is_string()) {
             result.level_cap = 0;
             result.problems.emplace_back("default_device_index must be string");
-            return result;
         }
     }
 
