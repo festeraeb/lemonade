@@ -10,7 +10,8 @@ spec claims (a downgrade, not a failure). Level 0 needs no test: the engine can 
                    (checked on the device with nvidia-smi, not taken from the engine's word)
     L2 eviction    with max_models llm=1, loading another model evicts this one and frees its memory
     L3 options     a per-model device option is honoured: the engine runs on the GPU it was given
-    L4 telemetry   the spec's telemetry_path answers through lemond's telemetry
+    L4 telemetry   the engine's telemetry_path or memory_path answers through lemond's /api/v1/stats
+                   (engine_telemetry.<model>)
 
     python tools/adapter_conformance.py --lemond http://127.0.0.1:13806 --model <adapter model> \
         [--other <a second adapter model, for L2>] [--device <GPU index for L3>] [--json]
@@ -231,21 +232,41 @@ def run(base: str, model: str, other: str | None, device: int | None) -> dict:
     try:
         chat(base, model)
         stats = call(base, "/api/v1/stats", timeout=20)
-        has = "adapter_stats" in json.dumps(stats)
-        result(
-            4,
-            has,
-            (
-                "adapter_stats served by lemond"
-                if has
-                else "no adapter_stats (spec has no telemetry_path?)"
-            ),
-        )
+        ok, why = telemetry_verdict(stats, model)
+        result(4, ok, why)
     except Exception as e:  # noqa: BLE001
         result(4, False, f"stats failed: {e}")
     finally:
         call(base, "/api/v1/unload", {"model_name": model}, timeout=120)
     return report
+
+
+def telemetry_verdict(stats, model):
+    """(passed, what was seen) for the engine's data in lemond's /api/v1/stats."""
+    engines = stats.get("engine_telemetry") if isinstance(stats, dict) else None
+    if engines is None:
+        return False, (
+            "/api/v1/stats has no engine_telemetry object: this lemond does not call "
+            "get_additional_telemetry() (the router hook is missing)"
+        )
+    entry = engines.get(model)
+    if entry is None:
+        entry = next((v for k, v in engines.items() if k.endswith("." + model)), None)
+    if entry is None:
+        return False, (
+            f"engine_telemetry has no entry for {model}: the engine reported nothing "
+            "(spec has neither telemetry_path nor memory_path, or the engine is not READY)"
+        )
+    if "adapter_stats" not in entry and "adapter_memory" not in entry:
+        err = entry.get("error", "no adapter_stats or adapter_memory key")
+        return False, f"engine_telemetry for {model} carries no engine data: {err}"
+    if entry.get("adapter_stats") is None and "adapter_memory" not in entry:
+        return False, (
+            f"adapter_stats for {model} is null: telemetry_path did not answer within 2 s"
+        )
+    if "adapter_memory" in entry and "error" in (entry["adapter_memory"] or {}):
+        return False, f"adapter_memory error: {entry['adapter_memory']['error']}"
+    return True, "engine data served by lemond in engine_telemetry"
 
 
 def main() -> int:
