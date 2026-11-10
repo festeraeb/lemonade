@@ -158,12 +158,12 @@ R1 to R17 are the requests we drew up while building the plane. The plane works 
 | R2 | Optional `binary_sha256` checked before launch | A catalogue can pin what runs | Checked in `load()` when present | In the plane |
 | R3 | Spec sources limited to signed catalogues or a local folder; env by allowlist | A spec starts a process | Local folder only; allowlist enforced | Allowlist in the plane; signed catalogues are yours to decide |
 | R4 | Port allocated by lemond | Avoids collisions | `{port}` comes from lemond's `choose_port()` | In the plane |
-| R5 | Probe states starting, loading (progress), ready, warm; timeout per spec | Large models load for minutes; honest UI | Classifier written and tested; `load()` uses ready/error values and the spec timeout | Classifier in the plane; showing the states needs lemond |
+| R5 | Probe states starting, loading (progress), ready, warm; timeout per spec | Large models load for minutes; honest UI | `AdapterServer::load()` classifies each probe with `ready_state()` (ready, warm, loading, error), counts the spec timeout from the start of the load, and logs loading progress | In `cesarops/adapter-hooks`; the model is not listed by `/health` until the load ends, so progress is in the log only |
 | R6 | Health as a probe with a latency budget | A hung engine should leave rotation | lemond's existing health flag | Not built |
 | R7 | Per-level conformance with downgrade | Keep the control the adapter earned | `adapter_conformance.py` reports the level; lemond does not act on it at runtime | Tool in the plane; runtime use needs lemond |
 | R8 | Unload verified against the device | One wrong adapter must not break eviction | `unload()` checks `nvidia-smi` / `rocm-smi` for the engine's process tree and kills a leftover holder; the tool checks the device too | In the plane (Linux) |
-| R9 | Memory report per device and tier | MoE engines span VRAM, host RAM, remote memory | Parser and `adapter_memory` stats object written and tested; reported through `get_additional_telemetry()`, which nothing in lemond calls | **Needs lemond**: a router hook that calls `WrappedServer::get_additional_telemetry()` |
-| R10 | Budget verb: shrink to N MiB on device X | Serve slower instead of evicting | Request builder and reply parser tested; no caller, no endpoint | **Needs lemond**: same hook, plus a verb in the eviction path |
+| R9 | Memory report per device and tier | MoE engines span VRAM, host RAM, remote memory | `adapter_memory` is built by `memory_telemetry()`; `Router::collect_engine_telemetry()` calls `get_additional_telemetry()` on each loaded engine and `/api/v1/stats` returns it under `engine_telemetry.<model>` | In `cesarops/adapter-hooks` |
+| R10 | Budget verb: shrink to N MiB on device X | Serve slower instead of evicting | Request builder and reply parser tested; no caller, no endpoint | The telemetry hook is in `cesarops/adapter-hooks`; the verb in the eviction path is not built |
 | R11 | Device by UUID | Index order changes | Index or UUID accepted; both placeholders filled | In the plane |
 | R12 | Metrics passthrough under the engine id | Operators see engine metrics | `telemetry_path` is read; not proxied as a route | Not built |
 | R13 | Engine may own helper processes, including remote | Some engines span hosts | Engine is one process to lemond | Not built; invisible to lemond |
@@ -172,6 +172,8 @@ R1 to R17 are the requests we drew up while building the plane. The plane works 
 | R16 | Versioned spec, unknown fields ignored, missing required fields give L0 | Specs outlive daemon versions | `check_spec()` | In the plane |
 | R17 | Hook map with fingerprints and a CI check | Tells the author what moved | `hook_map.json`, `adapter_hook_map.py`, `adapter_hook_check.py` | In the plane |
 
-The one change that unlocks the most is the router hook. At present `get_additional_telemetry()` is declared on `WrappedServer` and implemented by the adapter, but the router only uses the URL and parser variants for per-request spans, and `/api/v1/stats` returns lemond's own aggregates. A hook that lets the router call it, pinning a loaded engine for the duration of the short call, would deliver R9 (memory in stats) and give R10 a place to land, and it would let the conformance L4 check pass. That is the reason the live test case above fails.
+`cesarops/adapter-hooks` also fills `{ctx}` (the recipe's `ctx_size`, else the model's registered window) and reports `device` as `cpu` for a spec that selects no GPU.
+
+The router hook is the change that unlocks the most. `Router::collect_engine_telemetry()` pins each READY engine with `WrappedServer::try_pin_ready()` (no wait, no restore), calls `get_additional_telemetry()` on a worker thread with no router lock held, and waits at most three seconds; an engine that has not answered gets `{"error": "telemetry timed out"}` and the worker releases the pin when the call returns. Backends that return nothing are left out of the object.
 
 If a different shape suits Lemonade better, for example a manifest-declared metrics route instead of a method call, the plane's parsers and tests carry over unchanged.
