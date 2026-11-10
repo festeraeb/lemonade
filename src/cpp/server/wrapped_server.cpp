@@ -36,6 +36,16 @@ utils::RequestCancelToken WrappedServer::current_request_cancel_context() {
     return t_request_cancel_ctx;
 }
 
+ModelUnloadingException WrappedServer::unloading_exception() const {
+    const std::string model = get_model_name();
+    return ModelUnloadingException(model.empty() ? server_name_ : model);
+}
+
+utils::RequestCancelToken WrappedServer::cancel_token_with_unload(
+    const utils::RequestCancelToken& token) const {
+    return {token.flag, [this, token]() { return is_unloading() || token.cancelled(); }};
+}
+
 namespace {
 
 std::string lower_copy(std::string value) {
@@ -684,7 +694,10 @@ Json WrappedServer::forward_body(const std::string& endpoint,
     std::string url = get_base_url() + endpoint;
     std::map<std::string, std::string> headers = {{"Content-Type", "application/json"}};
 
-    auto cancel_token = current_request_cancel_context();
+    auto cancel_token = cancel_token_with_unload(current_request_cancel_context());
+    if (is_unloading()) {
+        return unloading_exception().to_json();
+    }
     if (cancel_token.cancelled()) {
         LOG(WARNING, "WrappedServer") << "Client request already cancelled before forwarding non-streaming request; aborting." << std::endl;
         return ErrorResponse::create("Request cancelled by client", ErrorType::INVALID_REQUEST);
@@ -718,6 +731,10 @@ Json WrappedServer::forward_body(const std::string& endpoint,
             );
         }
     } catch (const utils::HttpClientCancellationException& e) {
+        if (is_unloading()) {
+            LOG(WARNING, "WrappedServer") << "Non-streaming request aborted: model is being unloaded" << std::endl;
+            return unloading_exception().to_json();
+        }
         LOG(WARNING, "WrappedServer") << "Non-streaming request aborted due to client disconnect: " << e.what() << std::endl;
         return ErrorResponse::create("Request cancelled by client", ErrorType::INVALID_REQUEST);
     } catch (const std::exception& e) {
@@ -764,7 +781,10 @@ json WrappedServer::forward_multipart_request(const std::string& endpoint,
 
     std::string url = get_base_url() + endpoint;
 
-    auto cancel_token = current_request_cancel_context();
+    auto cancel_token = cancel_token_with_unload(current_request_cancel_context());
+    if (is_unloading()) {
+        return unloading_exception().to_json();
+    }
     if (cancel_token.cancelled()) {
         LOG(WARNING, "WrappedServer") << "Client request already cancelled before forwarding multipart request; aborting." << std::endl;
         return ErrorResponse::create("Request cancelled by client", ErrorType::INVALID_REQUEST);
@@ -801,6 +821,9 @@ json WrappedServer::forward_multipart_request(const std::string& endpoint,
             );
         }
     } catch (const utils::HttpClientCancellationException& e) {
+        if (is_unloading()) {
+            return unloading_exception().to_json();
+        }
         LOG(WARNING, "WrappedServer") << "Multipart request aborted due to client disconnect: " << e.what() << std::endl;
         return ErrorResponse::create("Request cancelled by client", ErrorType::INVALID_REQUEST);
     } catch (const std::exception& e) {
@@ -838,9 +861,20 @@ void WrappedServer::forward_streaming_request(const std::string& endpoint,
         return;
     }
 
+    if (is_unloading()) {
+        const json error = unloading_exception().to_json();
+        const std::string error_msg = "data: " + error.dump() + "\n\n";
+        sink.write(error_msg.c_str(), error_msg.size());
+        sink.done();
+        return;
+    }
+
     BackendRequestScope request_scope(*this, BackendRequestKind::Streaming);
 
     std::string url = get_base_url() + endpoint;
+    const auto abort_reason = [this]() {
+        return is_unloading() ? std::string(unloading_exception().what()) : std::string();
+    };
     bool streamed_any_bytes = false;
     auto mark_stream_progress = [this, &streamed_any_bytes]() {
         if (!streamed_any_bytes) {
@@ -861,11 +895,15 @@ void WrappedServer::forward_streaming_request(const std::string& endpoint,
                     }
                 },
                 timeout_seconds,
-                mark_stream_progress
+                mark_stream_progress,
+                1000,
+                abort_reason
             );
         } else {
             StreamingProxy::forward_byte_stream(url, request_body, sink, timeout_seconds,
-                mark_stream_progress
+                mark_stream_progress,
+                {},
+                abort_reason
             );
         }
     } catch (const std::exception& e) {

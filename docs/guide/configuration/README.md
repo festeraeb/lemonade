@@ -400,7 +400,9 @@ lemonade config set llamacpp.vulkan_bin=builtin
 
 #### Behavior when `*_bin` changes
 
-Changing a `*_bin` value applies live: lemonade unloads any model currently using that backend, downloads the new binary if needed, and reloads the model on the new binary. No `lemond` restart is required.
+Changing a `*_bin` value applies live: lemonade downloads the new binary if needed and uses it for every model loaded afterwards. Models that are already loaded keep running on the binary they started with, so an in-flight request and its KV cache are not lost; unload and load a model to move it to the new binary. No `lemond` restart is required.
+
+On Windows a running executable cannot be replaced, so there lemonade unloads the models that use the changed backend, installs the new binary and reloads them on it.
 
 #### `latest` re-resolution
 
@@ -478,6 +480,21 @@ sudo systemctl restart lemond
 # %USERPROFILE%\.config\lemonade\config.json
 # Then quit and relaunch from the Start Menu
 ```
+
+## Network Proxy
+
+`lemond` sends model downloads, backend downloads, Hugging Face and GitHub API calls and other outgoing HTTPS requests through a proxy when the standard environment variables are set in the `lemond` process environment:
+
+| Variable | Used for |
+| --- | --- |
+| `HTTPS_PROXY` / `https_proxy` | `https://` requests |
+| `HTTP_PROXY` / `http_proxy` | `http://` requests |
+| `ALL_PROXY` / `all_proxy` | Either scheme, when the specific variable is unset |
+| `NO_PROXY` / `no_proxy` | Comma-separated hosts, domains or CIDR ranges that connect directly |
+
+If both spellings of a variable are set, the lowercase one wins. A proxy value without a scheme is treated as `http://`; `socks5://` proxies are accepted. A proxy URL may carry credentials (`http://user:pass@proxy:3128`), which are never logged. Loopback (`localhost`, `127.0.0.1`, `::1`) is always exempt, and requests to the llama.cpp and other backends that `lemond` manages on loopback never use a proxy. With none of these variables set, nothing changes.
+
+For a `systemd` service, set the variables in the unit's environment, for example with `systemctl edit lemond` and an `Environment="HTTPS_PROXY=http://proxy.example:3128"` line.
 
 ## lemond CLI
 

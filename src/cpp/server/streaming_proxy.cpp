@@ -6,6 +6,7 @@
 #include <stdexcept>
 #include <string_view>
 #include <curl/curl.h>
+#include <lemon/error_types.h>
 #include <lemon/utils/aixlog.hpp>
 
 namespace lemon {
@@ -141,7 +142,8 @@ void StreamingProxy::forward_sse_stream(
     std::function<void(const TelemetryData&)> on_complete,
     long timeout_seconds,
     std::function<void()> on_chunk,
-    long heartbeat_interval_ms) {
+    long heartbeat_interval_ms,
+    std::function<std::string()> abort_reason) {
 
     TelemetryData telemetry;
     try {
@@ -160,6 +162,7 @@ void StreamingProxy::forward_sse_stream(
 
     int backend_status = 200;
     std::string error_body;
+    std::string aborted_with;
     static constexpr size_t max_error_body = 64 * 1024;
 
     // Chunk boundaries are arbitrary, so whether the stream carried any event
@@ -241,9 +244,17 @@ void StreamingProxy::forward_sse_stream(
         timeout_seconds,
         [&backend_status](int status) { backend_status = status; },
         utils::HttpSecurityPolicy::TrustedLoopback,
-        [&sink, &last_activity_time, &backend_status, heartbeat_interval_ms]() {
+        [&sink, &last_activity_time, &backend_status, heartbeat_interval_ms, &abort_reason,
+         &aborted_with]() {
             if (sink.is_writable && !sink.is_writable()) {
                 return true;
+            }
+
+            if (abort_reason) {
+                aborted_with = abort_reason();
+                if (!aborted_with.empty()) {
+                    return true;
+                }
             }
 
             if (heartbeat_interval_ms > 0 && backend_status == 200) {
@@ -267,13 +278,27 @@ void StreamingProxy::forward_sse_stream(
     // bytes can arrive, so the last event of a CR-terminated stream still counts.
     process_sse_lines(line_buffer, process_line, true);
 
+    const bool aborted_by_server = !aborted_with.empty();
     const bool client_disconnected =
-        result.curl_code == CURLE_WRITE_ERROR ||
-        result.curl_code == CURLE_ABORTED_BY_CALLBACK;
+        !aborted_by_server &&
+        (result.curl_code == CURLE_WRITE_ERROR ||
+         result.curl_code == CURLE_ABORTED_BY_CALLBACK);
     const bool transport_interrupted =
         result.curl_code == CURLE_PARTIAL_FILE || result.curl_code == CURLE_RECV_ERROR;
 
-    if (result.curl_code != CURLE_OK) {
+    if (aborted_by_server) {
+        // The server ended this stream on purpose (the model is being unloaded).
+        // Say so as a final event: the client would otherwise see a response
+        // that stops mid-sentence with no explanation.
+        stream_error = true;
+        LOG(WARNING, "StreamingProxy") << "SSE stream aborted: " << aborted_with << std::endl;
+        telemetry.error_message = aborted_with;
+        const json payload{{"error", {{"message", aborted_with},
+                                      {"type", ErrorType::MODEL_UNLOADING},
+                                      {"status_code", 503}}}};
+        const std::string event = "data: " + payload.dump() + "\n\n";
+        sink.write(event.data(), event.size());
+    } else if (result.curl_code != CURLE_OK) {
         if (client_disconnected) {
             stream_error = true;
             LOG(WARNING, "StreamingProxy") << "Client disconnected during SSE stream (CURL error: " << result.curl_error << ")" << std::endl;
@@ -295,7 +320,7 @@ void StreamingProxy::forward_sse_stream(
         }
     }
 
-    if (!client_disconnected &&
+    if (!client_disconnected && !aborted_by_server &&
         (result.status_code != 200 || backend_status != 200)) {
         const int status = backend_status != 200 ? backend_status : result.status_code;
         LOG(ERROR, "StreamingProxy") << "Backend returned error: " << status
@@ -400,9 +425,11 @@ void StreamingProxy::forward_byte_stream(
     httplib::DataSink& sink,
     long timeout_seconds,
     std::function<void()> on_chunk,
-    const std::map<std::string, std::string>& headers) {
+    const std::map<std::string, std::string>& headers,
+    std::function<std::string()> abort_reason) {
 
     bool stream_error = false;
+    std::string aborted_with;
 
     // On a non-200 the backend body is an error description, not payload bytes:
     // divert it here instead of the client sink, so it can be reshaped into a
@@ -435,11 +462,27 @@ void StreamingProxy::forward_byte_stream(
         headers,
         timeout_seconds,
         [&backend_status](int status) { backend_status = status; },
-        utils::HttpSecurityPolicy::TrustedLoopback
+        utils::HttpSecurityPolicy::TrustedLoopback,
+        abort_reason ? std::function<bool()>([&abort_reason, &aborted_with]() {
+            aborted_with = abort_reason();
+            return !aborted_with.empty();
+        }) : std::function<bool()>(nullptr)
     );
 
     const bool transport_interrupted =
         result.curl_code == CURLE_PARTIAL_FILE || result.curl_code == CURLE_RECV_ERROR;
+
+    if (!aborted_with.empty()) {
+        stream_error = true;
+        LOG(WARNING, "StreamingProxy") << "Byte stream aborted: " << aborted_with << std::endl;
+        const json payload{{"error", {{"message", aborted_with},
+                                      {"type", ErrorType::MODEL_UNLOADING},
+                                      {"status_code", 503}}}};
+        const std::string out = payload.dump();
+        sink.write(out.data(), out.size());
+        sink.done();
+        return;
+    }
 
     if (result.curl_code != CURLE_OK) {
         stream_error = true;

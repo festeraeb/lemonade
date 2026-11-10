@@ -50,6 +50,9 @@ public:
 
     static nlohmann::ordered_json error_event_schema();
 
+    // abort_reason, when set, is polled while the backend transfer runs. A
+    // non-empty return stops the transfer, and the client receives that message
+    // as a final error event (503, type model_unloading) in place of [DONE].
     static void forward_sse_stream(
         const std::string& backend_url,
         const std::string& request_body,
@@ -57,7 +60,8 @@ public:
         std::function<void(const TelemetryData&)> on_complete = nullptr,
         long timeout_seconds = 300,
         std::function<void()> on_chunk = nullptr,
-        long heartbeat_interval_ms = 1000
+        long heartbeat_interval_ms = 1000,
+        std::function<std::string()> abort_reason = nullptr
     );
 
     static void forward_byte_stream(
@@ -66,7 +70,8 @@ public:
         httplib::DataSink& sink,
         long timeout_seconds = 300,
         std::function<void()> on_chunk = nullptr,
-        const std::map<std::string, std::string>& headers = {}
+        const std::map<std::string, std::string>& headers = {},
+        std::function<std::string()> abort_reason = nullptr
     );
 
     // Splits on all three SSE line terminators (LF, CRLF, CR). A trailing CR is

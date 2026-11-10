@@ -327,6 +327,16 @@ private:
     // residency slot to clear wakes and returns instead of blocking teardown.
     bool reclaim_shutdown_ = false;
 
+    // Models an explicit unload is tearing down. Checked before load_mutex_ is
+    // taken, because the unload holds that mutex while it waits for the
+    // cancelled requests to unwind and a request queued behind it would
+    // otherwise hang for the whole teardown. Guarded by teardown_mutex_.
+    mutable std::mutex teardown_mutex_;
+    std::multiset<std::string> tearing_down_models_;
+    bool is_tearing_down(const std::string& requested_model) const;
+    void begin_teardown(WrappedServer* server);
+    void end_teardown(const std::string& model_name);
+
     bool exclusive_active_ = false;
     std::thread::id exclusive_owner_;
     std::condition_variable exclusive_cv_;

@@ -2709,6 +2709,20 @@ if(BUILD_TESTING AND EXISTS "${_LATEST_FALLBACK_TEST_SRC}")
     add_cpp_ci_test(LatestVersionFallbackTest CI ON COMMAND test_latest_version_fallback)
 endif()
 
+# Policy for loaded models when a backend's *_bin value changes
+# (lemon::plan_bin_change). Header-only, so the test links nothing beyond the
+# standard library.
+set(_BIN_CHANGE_PLAN_TEST_SRC
+    "${CMAKE_CURRENT_SOURCE_DIR}/test/cpp/test_bin_change_plan.cpp"
+)
+if(BUILD_TESTING AND EXISTS "${_BIN_CHANGE_PLAN_TEST_SRC}")
+    add_executable(test_bin_change_plan test/cpp/test_bin_change_plan.cpp)
+    target_include_directories(test_bin_change_plan PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/cpp/include
+    )
+    add_cpp_ci_test(BinChangePlanTest CI ON COMMAND test_bin_change_plan)
+endif()
+
 # Label-to-deployment-mode mapping (lemon::get_model_type_from_labels). Header-only,
 # so the test links nothing beyond the standard library.
 set(_MODEL_TYPE_CLASSIFIER_TEST_SRC
@@ -3931,6 +3945,20 @@ if(BUILD_TESTING AND EXISTS "${_HTTP_CLIENT_SECURITY_TEST_SRC}")
     add_cpp_ci_test(HttpClientSecurityTest CI OFF COMMAND test_http_client_security)
 endif()
 
+set(_HTTP_CLIENT_PROXY_TEST_SRC "${CMAKE_CURRENT_SOURCE_DIR}/test/cpp/test_http_client_proxy.cpp")
+if(BUILD_TESTING AND EXISTS "${_HTTP_CLIENT_PROXY_TEST_SRC}")
+    add_executable(test_http_client_proxy test/cpp/test_http_client_proxy.cpp)
+    target_link_libraries(test_http_client_proxy PRIVATE lemonade-server-core)
+    add_cpp_ci_test(HttpClientProxyTest CI ON COMMAND test_http_client_proxy)
+endif()
+
+set(_DOWNLOAD_RESUME_TEST_SRC "${CMAKE_CURRENT_SOURCE_DIR}/test/cpp/test_download_resume.cpp")
+if(BUILD_TESTING AND EXISTS "${_DOWNLOAD_RESUME_TEST_SRC}")
+    add_executable(test_download_resume test/cpp/test_download_resume.cpp)
+    target_link_libraries(test_download_resume PRIVATE lemonade-server-core)
+    add_cpp_ci_test(DownloadResumeTest CI ON COMMAND test_download_resume)
+endif()
+
 set(_HTTP_CLIENT_TIMEOUT_TEST_SRC "${CMAKE_CURRENT_SOURCE_DIR}/test/cpp/test_http_client_timeout.cpp")
 if(BUILD_TESTING AND EXISTS "${_HTTP_CLIENT_TIMEOUT_TEST_SRC}")
     add_executable(test_http_client_timeout test/cpp/test_http_client_timeout.cpp)
@@ -3946,6 +3974,13 @@ if(BUILD_TESTING AND EXISTS "${_REQUEST_CANCELLATION_TEST_SRC}")
     add_executable(test_request_cancellation test/cpp/test_request_cancellation.cpp)
     target_link_libraries(test_request_cancellation PRIVATE lemonade-server-core)
     add_cpp_ci_test(RequestCancellationTest CI ON COMMAND test_request_cancellation)
+endif()
+
+set(_UNLOAD_CANCELLATION_TEST_SRC "${CMAKE_CURRENT_SOURCE_DIR}/test/cpp/test_unload_cancellation.cpp")
+if(BUILD_TESTING AND EXISTS "${_UNLOAD_CANCELLATION_TEST_SRC}")
+    add_executable(test_unload_cancellation test/cpp/test_unload_cancellation.cpp)
+    target_link_libraries(test_unload_cancellation PRIVATE lemonade-server-core)
+    add_cpp_ci_test(UnloadCancellationTest CI ON COMMAND test_unload_cancellation)
 endif()
 
 set(_STREAMING_HEARTBEAT_TEST_SRC "${CMAKE_CURRENT_SOURCE_DIR}/test/cpp/test_streaming_heartbeat.cpp")

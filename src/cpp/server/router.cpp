@@ -1326,6 +1326,17 @@ void Router::unload_model(const std::string& model_name) {
     if (model_name.empty()) {
         // Unload all models
         LOG(INFO, "Router") << "Unload all models called" << std::endl;
+        std::vector<std::string> names;
+        for (const auto& server : loaded_servers_) {
+            begin_teardown(server.get());
+            names.push_back(server->get_model_name());
+        }
+        // A throwing unload must not leave the names refused for good.
+        struct EndTeardown {
+            Router* router;
+            const std::vector<std::string>& names;
+            ~EndTeardown() { for (const auto& name : names) router->end_teardown(name); }
+        } end_all{this, names};
         evict_all_servers();
     } else {
         // Unload specific model
@@ -1335,8 +1346,41 @@ void Router::unload_model(const std::string& model_name) {
         if (!server) {
             throw std::runtime_error("Model not loaded: " + model_name);
         }
+        const std::string internal_name = server->get_model_name();
+        begin_teardown(server);
+        struct EndTeardown {
+            Router* router;
+            const std::string& name;
+            ~EndTeardown() { router->end_teardown(name); }
+        } end_one{this, internal_name};
         evict_server(server);
     }
+}
+
+void Router::begin_teardown(WrappedServer* server) {
+    {
+        std::lock_guard<std::mutex> lock(teardown_mutex_);
+        tearing_down_models_.insert(server->get_model_name());
+    }
+    // In-flight requests see this at their next cancellation check and end with
+    // a model_unloading error instead of running to completion.
+    server->begin_unload();
+}
+
+void Router::end_teardown(const std::string& model_name) {
+    std::lock_guard<std::mutex> lock(teardown_mutex_);
+    auto it = tearing_down_models_.find(model_name);
+    if (it != tearing_down_models_.end()) tearing_down_models_.erase(it);
+}
+
+bool Router::is_tearing_down(const std::string& requested_model) const {
+    {
+        std::lock_guard<std::mutex> lock(teardown_mutex_);
+        if (tearing_down_models_.empty()) return false;
+    }
+    const std::string canonical = resolve_model_name(requested_model);
+    std::lock_guard<std::mutex> lock(teardown_mutex_);
+    return tearing_down_models_.count(canonical) > 0;
 }
 
 void Router::evict_if_committed(const std::string& model_name) {
@@ -1634,6 +1678,10 @@ auto Router::execute_inference(const json& request, Func&& inference_func) -> de
         return ErrorResponse::from_exception(InvalidRequestException("No model specified in request"));
     }
 
+    if (is_tearing_down(requested_model)) {
+        return ModelUnloadingException(requested_model).to_json();
+    }
+
     // A watchdog reset should be transparent for non-streaming calls when the
     // backend died before any response was returned. Retry exactly once after a
     // lazy reload; streaming paths deliberately do not retry after partial data.
@@ -1741,6 +1789,14 @@ void Router::execute_streaming(const std::string& request_body, httplib::DataSin
         LOG(ERROR, "Router") << "No model specified in streaming request" << std::endl;
         json error = ErrorResponse::from_exception(InvalidRequestException("No model specified in request"));
         std::string error_msg = "data: " + error.dump() + "\n\n";
+        sink.write(error_msg.c_str(), error_msg.size());
+        sink.done();
+        return;
+    }
+
+    if (is_tearing_down(requested_model)) {
+        const std::string error_msg =
+            "data: " + ModelUnloadingException(requested_model).to_json().dump() + "\n\n";
         sink.write(error_msg.c_str(), error_msg.size());
         sink.done();
         return;
