@@ -58,7 +58,7 @@ std::vector<std::string> build_argv(const json& spec, const std::map<std::string
 
 // Variable names a spec may set: any name starting with one of these prefixes ...
 inline const std::vector<std::string> kEnvPrefixes = {
-    "CUDA_", "HIP_", "ROCR_", "HSA_", "GGML_", "LLAMA_", "OMP_", "MKL_", "VK_", "NAUTIBURN_", "STRATA_", "LEMONADE_ENGINE_"};
+    "CUDA_", "HIP_", "ROCR_", "HSA_", "GGML_", "LLAMA_", "OMP_", "MKL_", "VK_", "NAUTIBURN_", "STRATA_", "LB_", "LEMONADE_ENGINE_"};
 // ... and these exact names.
 inline const std::vector<std::string> kEnvNames = {"LD_LIBRARY_PATH", "TZ"};
 
