@@ -3,6 +3,7 @@
 #include "lemon/backends/llamacpp/llamacpp_gguf.h"
 #include "lemon/backends/llamacpp/llamacpp_request.h"
 #include "lemon/backends/llamacpp/llamacpp_systemone.h"
+#include "lemon/backends/llamacpp/llamacpp_tuning.h"
 #include "llamacpp_system_utils.h"
 #include "lemon/backends/backend_registry.h"
 #include "lemon/backends/backend_ops.h"
@@ -470,6 +471,14 @@ void LlamaCppServer::load(const std::string& model_name,
                                   << ctx_size << " tokens)" << std::endl;
         }
         encoder_max_input_tokens_ = batch.max_input_tokens;
+    }
+
+    // RoPE / YaRN scaling options, passed only when set. A flag the user spelled
+    // in llamacpp_args wins and is not duplicated here.
+    {
+        const std::vector<std::string> rope_args =
+            llamacpp::build_rope_args(options, parse_custom_args(llamacpp_args));
+        args.insert(args.end(), rope_args.begin(), rope_args.end());
     }
 
     // Validate and append custom arguments

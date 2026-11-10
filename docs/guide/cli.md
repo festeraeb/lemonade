@@ -380,6 +380,15 @@ The following options are available depending on the recipe being used:
 | `--llamacpp BACKEND` | LlamaCpp backend to use | Auto-detected |
 | `--llamacpp-device DEVICES` | Comma-separated list of accelerator devices to use (e.g. Vulkan0) | `""` |
 | `--llamacpp-args ARGS` | Custom arguments to pass to llama-server | `""` |
+| `--llamacpp-rope-scaling TYPE` | RoPE scaling type: none, linear or yarn (unset = from the model) | `""` |
+| `--llamacpp-rope-scale SIZE` | RoPE context scaling factor, expands context by this factor (unset = from the model) | auto |
+| `--llamacpp-rope-freq-base SIZE` | RoPE base frequency, used by NTK-aware scaling (unset = from the model) | auto |
+| `--llamacpp-rope-freq-scale SIZE` | RoPE frequency scaling factor, expands context by 1/factor (unset = from the model) | auto |
+| `--llamacpp-yarn-orig-ctx SIZE` | YaRN original context size of the model (unset = from the model) | auto |
+| `--llamacpp-yarn-ext-factor SIZE` | YaRN extrapolation mix factor, 0.0 = full interpolation (unset = from the model) | auto |
+| `--llamacpp-yarn-attn-factor SIZE` | YaRN scale sqrt(t) or attention magnitude (unset = from the model) | auto |
+| `--llamacpp-yarn-beta-slow SIZE` | YaRN high correction dimension or alpha (unset = from the model) | auto |
+| `--llamacpp-yarn-beta-fast SIZE` | YaRN low correction dimension or beta (unset = from the model) | auto |
 
 #### HRX GPU (`llamacpp-hrx` recipe)
 

@@ -4003,6 +4003,13 @@ if(BUILD_TESTING AND EXISTS "${_RECIPE_OPTIONS_PRECEDENCE_TEST_SRC}")
     add_cpp_ci_test(RecipeOptionsPrecedence CI ON COMMAND test_recipe_options_precedence)
 endif()
 
+set(_LLAMACPP_TUNING_TEST_SRC "${CMAKE_CURRENT_SOURCE_DIR}/test/cpp/test_llamacpp_tuning.cpp")
+if(BUILD_TESTING AND EXISTS "${_LLAMACPP_TUNING_TEST_SRC}")
+    add_executable(test_llamacpp_tuning ${_LLAMACPP_TUNING_TEST_SRC})
+    target_link_libraries(test_llamacpp_tuning PRIVATE lemonade-server-core)
+    add_cpp_ci_test(LlamacppTuning CI ON COMMAND test_llamacpp_tuning)
+endif()
+
 set(_GLIBC_MALLOPT_PROBE_SRC
     "${CMAKE_CURRENT_SOURCE_DIR}/test/cpp/glibc_mallopt_probe.cpp"
 )
