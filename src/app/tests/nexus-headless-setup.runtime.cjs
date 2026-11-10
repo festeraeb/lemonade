@@ -13,7 +13,8 @@ const { createNexusAccountService } = require('../src/features/nexus/accountSess
   const headless = { available: true, enabled: true, registered: false, unlock: 'passkey', identity_source: 'system',
     locked: true, mesh_up: false, status: 'locked', members: [], setup_code_required: true, setup_code_file: '/var/lib/lemonade/.config/lemonade/nexus/setup-code' };
   assert.equal(usesNexusDeviceKey(headless), true, 'a server asking for its setup code unlocks with its device key');
-  assert.equal(usesNexusDeviceKey({ ...headless, setup_code_required: undefined }), false, 'without the setup code flag a system identity still uses a passkey');
+  assert.equal(usesNexusDeviceKey({ ...headless, setup_code_required: undefined }), true, 'an unregistered system identity uses its device key even without the flag (upstream 44d15e3d7)');
+  assert.equal(usesNexusDeviceKey({ ...headless, registered: true, setup_code_required: undefined }), false, 'a registered system identity without the flag still uses its passkey');
   assert.equal(usesNexusDeviceKey({ ...headless, registered: true, unlock: 'passkey', setup_code_required: true }), false, 'a registered passkey device never switches to its key');
 
   // prepareNexus sends the code with the key unlock, trimmed, and only when one is given.
@@ -32,7 +33,7 @@ const { createNexusAccountService } = require('../src/features/nexus/accountSess
   const service = createNexusAccountService({
     controller: async () => ({ source: 'http://192.168.4.24:13305', local: true, request: async path => path === 'account' ? account : headless }),
     desktop: () => false,
-    prepare: async (name, joining, req, before, setupCode) => { prepared.push({ name, joining, setupCode }); },
+    prepare: async (name, joining, req, before, desktop, setupCode) => { prepared.push({ name, joining, setupCode }); },
   });
   await service.signIn({ action: 'create', deviceName: 'rack-server', source: 'http://192.168.4.24:13305', setupCode: 'ABCD-EFGH-JKMN' });
   assert.deepEqual(prepared, [{ name: 'rack-server', joining: false, setupCode: 'ABCD-EFGH-JKMN' }]);

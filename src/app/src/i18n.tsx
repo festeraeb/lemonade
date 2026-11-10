@@ -383,8 +383,6 @@ const ZH_CN: Record<string, string> = {
   'Warning': '警告',
   'Server URL': '服务器 URL',
   'Setup code': '设置代码',
-  "This network was founded again, so this device's account belongs to the earlier one. Forget it, then join again with a new invitation.": '此网络已重新创建，因此此设备的账户属于之前的网络。请忘记该网络，然后使用新的邀请重新加入。',
-  'Forget this network': '忘记此网络',
   'This server runs without a desktop, so it proves you own it with a one-time setup code. On the server: {command}': '此服务器没有桌面，因此使用一次性设置代码证明您拥有它。在服务器上运行：{command}',
   'Found on this network': '在此网络上发现',
   'Lemonade servers that announce themselves on your network. Nothing is used until you press Use.': '在您的网络上自我通告的 Lemonade 服务器。在您点击“使用”之前不会使用任何服务器。',
