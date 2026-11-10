@@ -101,7 +101,7 @@ void MoonshineServer::load(const std::string& model_name,
     // Probe all three before launching instead of assuming +1/+2 are free.
     port_ = 0;
     tcp_port_ = 0;
-    int start = 8001;
+    int start = RuntimeConfig::backend_port_base_or_default();
     for (int attempt = 0; attempt < 50; ++attempt) {
         int p = utils::ProcessManager::find_free_port(start);
         if (p == 0) {

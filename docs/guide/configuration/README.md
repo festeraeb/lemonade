@@ -49,6 +49,7 @@ When `lemond` starts, effective configuration is resolved by deep-merging settin
   "auto_evict": false,
   "auto_evict_threshold_pct": 0.9,
   "auto_update_models": false,
+  "backend_port_base": 8001,
   "broadcast": true,
   "cloud_providers": [],
   "config_version": 2,
@@ -217,6 +218,7 @@ When `lemond` starts, effective configuration is resolved by deep-merging settin
 | `log_file` | string | "auto" | File logging mode: "auto" (console-only for direct server runs, lemonade-server.log for embedded tray app), "disabled", "enabled", or custom target file path |
 | `log_max_file_size_mb` | int | 10 | Max active log file size in MB before triggering rotation (steady-state footprint bounded to ~`log_max_file_size_mb * (log_max_files + 1)`) |
 | `log_max_files` | int | 5 | Max number of rotated log backup files to retain (.1 through .N); legacy oversized files are rotated into .1 and pruned over cycles |
+| `backend_port_base` | int | 8001 | First port `lemond` tries when it picks a port for a backend child process such as `llama-server`; it scans upward from here for a free one (1024-65535). Set it to keep backend children out of a range other services use. Overridden by the `LEMONADE_BACKEND_PORT_BASE` environment variable. Takes effect on the next model load |
 | `global_timeout` | int | 600 | Timeout in seconds for HTTP, inference, and readiness checks |
 | `max_loaded_models` | int | 1 | Max models per type slot. Use -1 for unlimited |
 | `auto_evict` | bool | false | Enable dynamic VRAM management based on idle time and global GPU memory pressure. Can be overridden per model. |

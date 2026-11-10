@@ -447,6 +447,15 @@ long RuntimeConfig::global_timeout() const {
     return config_["global_timeout"].get<long>();
 }
 
+int RuntimeConfig::backend_port_base() const {
+    return get_int_opt("LEMONADE_BACKEND_PORT_BASE", {"backend_port_base"}, kDefaultBackendPortBase);
+}
+
+int RuntimeConfig::backend_port_base_or_default() {
+    const RuntimeConfig* config = global();
+    return config ? config->backend_port_base() : kDefaultBackendPortBase;
+}
+
 int RuntimeConfig::max_loaded_models() const {
     std::shared_lock lock(mutex_);
     return config_["max_loaded_models"].get<int>();
@@ -929,6 +938,14 @@ void RuntimeConfig::validate(const std::string& key, const json& value) const {
         }
         if (value.get<long>() <= 0) {
             throw std::invalid_argument("'global_timeout' must be positive");
+        }
+    } else if (key == "backend_port_base") {
+        if (!value.is_number_integer()) {
+            throw std::invalid_argument("'backend_port_base' must be an integer");
+        }
+        const int base = value.get<int>();
+        if (base < 1024 || base > 65535) {
+            throw std::invalid_argument("'backend_port_base' must be between 1024 and 65535");
         }
     } else if (key == "max_loaded_models") {
         if (!value.is_number_integer()) {

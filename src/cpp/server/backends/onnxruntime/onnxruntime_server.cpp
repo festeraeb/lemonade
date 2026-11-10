@@ -5,6 +5,7 @@
 #include "lemon/backends/backend_ops.h"
 #include "lemon/backends/backend_utils.h"
 #include "lemon/backends/hf_cache_util.h"
+#include "lemon/runtime_config.h"
 #include "lemon/backend_manager.h"
 #include "lemon/utils/path_utils.h"
 #include "lemon/utils/custom_args.h"
@@ -180,7 +181,7 @@ void OnnxRuntimeServer::load(const std::string& model_name,
     std::string executable = BackendUtils::get_backend_binary_path(*onnxruntime::spec(), "cpu");
     LOG(INFO, "OnnxRuntimeServer") << "Using executable: " << executable << std::endl;
 
-    port_ = utils::ProcessManager::find_free_port(8001);
+    port_ = utils::ProcessManager::find_free_port(RuntimeConfig::backend_port_base_or_default());
     if (port_ == 0) {
         throw std::runtime_error("Failed to find an available port for ort-server");
     }

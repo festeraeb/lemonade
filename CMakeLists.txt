@@ -3733,6 +3733,15 @@ if(BUILD_TESTING AND EXISTS "${_CONFIG_DOWNLOAD_RATE_LIMIT_TEST_SRC}")
     )
 endif()
 
+set(_CONFIG_BACKEND_PORT_TEST_SRC
+    "${CMAKE_CURRENT_SOURCE_DIR}/test/cpp/test_config_backend_port.cpp"
+)
+if(BUILD_TESTING AND EXISTS "${_CONFIG_BACKEND_PORT_TEST_SRC}")
+    add_executable(test_config_backend_port test/cpp/test_config_backend_port.cpp)
+    target_link_libraries(test_config_backend_port PRIVATE lemonade-server-core)
+    add_cpp_ci_test(ConfigBackendPortTest CI ON COMMAND test_config_backend_port)
+endif()
+
 set(_CONFIG_ALLOWED_ORIGINS_TEST_SRC
     "${CMAKE_CURRENT_SOURCE_DIR}/test/cpp/test_config_allowed_origins.cpp"
 )

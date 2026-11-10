@@ -1,4 +1,5 @@
 #include <lemon/wrapped_server.h>
+#include <lemon/runtime_config.h>
 #include <lemon/utils/process_manager.h>
 #include <lemon/utils/url_utils.h>
 #include <lemon/utils/http_client.h>
@@ -556,7 +557,7 @@ void WrappedServer::backend_watchdog_loop() {
 }
 
 int WrappedServer::choose_port() {
-    const int chosen_port = utils::ProcessManager::find_free_port(8001);
+    const int chosen_port = utils::ProcessManager::find_free_port(RuntimeConfig::backend_port_base_or_default());
     if (chosen_port < 0) {
         throw std::runtime_error("Failed to find free port for " + server_name_);
     }
