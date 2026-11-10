@@ -1,4 +1,5 @@
-// llama-server flags derived from recipe options: RoPE / YaRN scaling.
+// llama-server flags derived from recipe options and user arguments: RoPE / YaRN
+// scaling, and the CPU-only --no-mmproj-offload default.
 
 #include <lemon/backends/llamacpp/llamacpp_tuning.h>
 #include <lemon/recipe_options.h>
@@ -11,6 +12,7 @@
 using json = nlohmann::json;
 using lemon::RecipeOptions;
 using lemon::backends::llamacpp::build_rope_args;
+using lemon::backends::llamacpp::should_add_no_mmproj_offload;
 
 using Args = std::vector<std::string>;
 
@@ -76,6 +78,22 @@ int main() {
     }
     std::printf("[%s] unknown rope scaling type is rejected\n", threw ? "PASS" : "FAIL");
     failures += threw ? 0 : 1;
+
+    auto expect_bool = [&failures](const char* name, bool got, bool want) {
+        std::printf("[%s] %s\n", got == want ? "PASS" : "FAIL", name);
+        failures += got == want ? 0 : 1;
+    };
+    // #2358: lemond's own --no-mmproj-offload never blocks or doubles the user's.
+    expect_bool("CPU backend adds --no-mmproj-offload by default",
+                should_add_no_mmproj_offload(false, {}), true);
+    expect_bool("GPU backend never adds it, so a user's passes through",
+                should_add_no_mmproj_offload(true, {}), false);
+    expect_bool("CPU backend does not double a user's --no-mmproj-offload",
+                should_add_no_mmproj_offload(false, {"--no-mmproj-offload"}), false);
+    expect_bool("CPU backend yields to a user's --mmproj-offload",
+                should_add_no_mmproj_offload(false, {"--mmproj-offload"}), false);
+    expect_bool("unrelated user flags do not suppress the default",
+                should_add_no_mmproj_offload(false, {"-ngl", "20"}), true);
 
     return failures == 0 ? 0 : 1;
 }

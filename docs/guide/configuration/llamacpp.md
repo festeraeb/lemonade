@@ -198,6 +198,16 @@ lemonade config set rocm_channel=nightly
 lemonade config set llamacpp.rocm_bin=b1260
 ```
 
+## Passing llama-server Arguments
+
+`llamacpp_args` (`llamacpp.args` in `config.json`, `--llamacpp-args` on `lemonade load`) is appended to the llama-server command line. Arguments you set there take precedence over Lemonade's defaults wherever a default exists:
+
+- Lemonade does not pass `-ngl` / `--gpu-layers`, so llama-server's own offload choice applies and `-ngl 20` (or `--gpu-layers 20`) in `llamacpp_args` is passed through as written. This is how to let a model that does not fit in memory spill to system RAM.
+- On a CPU backend Lemonade adds `--no-mmproj-offload` for models with a projector. A `--no-mmproj-offload` or `--mmproj-offload` of your own replaces it. On a GPU backend nothing is added, so `--no-mmproj-offload` keeps the projector out of VRAM.
+- RoPE / YaRN recipe options (below) yield to the same flag in `llamacpp_args`.
+
+A small set of flags is still managed by Lemonade because it must know their values: `-m`, `--ctx-size`, `--port`, `--device`, `--jinja`, `--mmproj`, `--model-draft`, `--embeddings` and `--reranking` (with their aliases). Passing one of these is rejected with an error that lists them.
+
 ## Extending Context with RoPE / YaRN Scaling
 
 A model can be run past its trained context by scaling its rotary position embeddings. Lemonade exposes llama-server's RoPE and YaRN flags as recipe options. Each one is passed to llama-server only when it is set; leave one unset and llama-server uses the value stored in the model.

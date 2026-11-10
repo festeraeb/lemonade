@@ -415,7 +415,10 @@ void LlamaCppServer::load(const std::string& model_name,
         push_arg(args, reserved_flags, "--mmproj", mmproj_path);
         if (!use_gpu) {
             LOG(DEBUG, "LlamaCpp") << "Skipping mmproj argument since GPU mode is not enabled" << std::endl;
-            push_arg(args, reserved_flags, "--no-mmproj-offload");
+            // Not reserved: a user's own --no-mmproj-offload / --mmproj-offload wins.
+            if (llamacpp::should_add_no_mmproj_offload(use_gpu, parse_custom_args(llamacpp_args))) {
+                args.push_back("--no-mmproj-offload");
+            }
         }
     }
     push_reserved(reserved_flags, "--mmproj", std::vector<std::string>{"-mm", "-mmu", "--mmproj-url", "--no-mmproj", "--mmproj-auto", "--no-mmproj-auto"});

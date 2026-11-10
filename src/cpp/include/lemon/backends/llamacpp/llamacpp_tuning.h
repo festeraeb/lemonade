@@ -63,6 +63,19 @@ inline std::vector<std::string> build_rope_args(const RecipeOptions& options,
     return args;
 }
 
+// Whether lemond adds --no-mmproj-offload itself. On a CPU backend the
+// multimodal projector gains nothing from offload, so lemond turns it off, but
+// the flag is not reserved: one the user spells in llamacpp_args (either
+// --no-mmproj-offload or --mmproj-offload) is accepted and takes precedence.
+// A GPU backend never gets the flag from lemond, so a user's passes through.
+inline bool should_add_no_mmproj_offload(bool use_gpu, const std::vector<std::string>& user_tokens) {
+    if (use_gpu) {
+        return false;
+    }
+    return !utils::custom_args_has_flag(user_tokens, "--no-mmproj-offload") &&
+           !utils::custom_args_has_flag(user_tokens, "--mmproj-offload");
+}
+
 }  // namespace llamacpp
 }  // namespace backends
 }  // namespace lemon
