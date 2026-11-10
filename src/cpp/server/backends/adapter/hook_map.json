@@ -9,7 +9,7 @@
       "anchor": "^struct BackendDescriptor\\b",
       "kind": "block",
       "used_for": "adapter.h fills BackendDescriptor field by field, in order",
-      "fingerprint": "15f9cf715dba3323"
+      "fingerprint": "fb8e195f297b499d"
     },
     {
       "id": "slot-policy",
@@ -17,7 +17,7 @@
       "anchor": "^enum class SlotPolicy\\b",
       "kind": "block",
       "used_for": "SlotPolicy::Standard: adapter engines count toward slots and are evicted like local models",
-      "fingerprint": "08c7b85f1dd65dd9"
+      "fingerprint": "155d2be00711cfe0"
     },
     {
       "id": "server-command",
@@ -25,7 +25,7 @@
       "anchor": "^struct ServerCommand\\b",
       "kind": "block",
       "used_for": "the engine's program, args, env, port and ready probe",
-      "fingerprint": "2cded36f6e93b5b3"
+      "fingerprint": "fe74dfe35ba5eb3f"
     },
     {
       "id": "process-output",
