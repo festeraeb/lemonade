@@ -233,7 +233,7 @@
       "anchor": "^WrappedServer\\* Router::find_lru_server_in_pool\\(",
       "kind": "block",
       "used_for": "behaviour: backends that are not Unmetered are eviction candidates",
-      "fingerprint": "c5da5b656c71d378"
+      "fingerprint": "d00150f03e5fb4c2"
     },
     {
       "id": "empty-support",
