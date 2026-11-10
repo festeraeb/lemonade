@@ -3762,6 +3762,24 @@ if(BUILD_TESTING AND EXISTS "${_CONFIG_DOWNLOAD_RATE_LIMIT_TEST_SRC}")
     )
 endif()
 
+set(_CONFIG_BACKEND_PORT_TEST_SRC
+    "${CMAKE_CURRENT_SOURCE_DIR}/test/cpp/test_config_backend_port.cpp"
+)
+if(BUILD_TESTING AND EXISTS "${_CONFIG_BACKEND_PORT_TEST_SRC}")
+    add_executable(test_config_backend_port test/cpp/test_config_backend_port.cpp)
+    target_link_libraries(test_config_backend_port PRIVATE lemonade-server-core)
+    add_cpp_ci_test(ConfigBackendPortTest CI ON COMMAND test_config_backend_port)
+endif()
+
+set(_CONFIG_SLOT_POLICY_TEST_SRC
+    "${CMAKE_CURRENT_SOURCE_DIR}/test/cpp/test_config_slot_policy.cpp"
+)
+if(BUILD_TESTING AND EXISTS "${_CONFIG_SLOT_POLICY_TEST_SRC}")
+    add_executable(test_config_slot_policy test/cpp/test_config_slot_policy.cpp)
+    target_link_libraries(test_config_slot_policy PRIVATE lemonade-server-core)
+    add_cpp_ci_test(ConfigSlotPolicyTest CI ON COMMAND test_config_slot_policy)
+endif()
+
 set(_CONFIG_ALLOWED_ORIGINS_TEST_SRC
     "${CMAKE_CURRENT_SOURCE_DIR}/test/cpp/test_config_allowed_origins.cpp"
 )
@@ -4051,6 +4069,13 @@ if(BUILD_TESTING AND EXISTS "${_RECIPE_OPTIONS_PRECEDENCE_TEST_SRC}")
     add_executable(test_recipe_options_precedence test/cpp/test_recipe_options_precedence.cpp)
     target_link_libraries(test_recipe_options_precedence PRIVATE lemonade-server-core)
     add_cpp_ci_test(RecipeOptionsPrecedence CI ON COMMAND test_recipe_options_precedence)
+endif()
+
+set(_LLAMACPP_TUNING_TEST_SRC "${CMAKE_CURRENT_SOURCE_DIR}/test/cpp/test_llamacpp_tuning.cpp")
+if(BUILD_TESTING AND EXISTS "${_LLAMACPP_TUNING_TEST_SRC}")
+    add_executable(test_llamacpp_tuning ${_LLAMACPP_TUNING_TEST_SRC})
+    target_link_libraries(test_llamacpp_tuning PRIVATE lemonade-server-core)
+    add_cpp_ci_test(LlamacppTuning CI ON COMMAND test_llamacpp_tuning)
 endif()
 
 set(_GLIBC_MALLOPT_PROBE_SRC

@@ -12,6 +12,8 @@
 
 namespace lemon {
 
+enum class SlotPolicy;
+
 using json = nlohmann::json;
 
 // Callback invoked after config changes are applied (outside the lock).
@@ -21,6 +23,8 @@ using ConfigSideEffectCallback = std::function<void(const json& applied_changes)
 
 class RuntimeConfig {
 public:
+    static constexpr int kDefaultBackendPortBase = 8001;
+
     /// Construct from a full nested config JSON (loaded from config.json).
     explicit RuntimeConfig(const json& config);
 
@@ -31,6 +35,12 @@ public:
     std::string host() const;
     void set_host_override(std::optional<std::string> override_val);
     int websocket_port() const;
+    // First port lemond tries when it picks a port for a backend child process
+    // (llama-server and the other wrapped backends); it scans upward from here
+    // for a free one. Default 8001.
+    int backend_port_base() const;
+    // backend_port_base() of the global config, or the default before it is set.
+    static int backend_port_base_or_default();
     std::string log_level() const;
     std::string log_file() const;
     void set_log_file_override(std::optional<std::string> override_val);
@@ -89,6 +99,11 @@ public:
     bool backend_bool(const std::string& backend, const std::string& key) const;
     int backend_int(const std::string& backend, const std::string& key) const;
     double backend_double(const std::string& backend, const std::string& key) const;
+
+    /// Slot/eviction policy for a recipe: the `slot_policy` key of the recipe's
+    /// config section when set (e.g. `{"halogen": {"slot_policy": "standard"}}`),
+    /// otherwise the backend descriptor's policy.
+    SlotPolicy slot_policy_for_recipe(const std::string& recipe) const;
 
     /// Returns recipe options in the flat format that RecipeOptions/backends expect.
     /// Maps nested config to flat keys: llamacpp.backend -> llamacpp_backend,

@@ -71,6 +71,16 @@ backend's hardware slot policy:
     - `whispercpp` supports loading exactly 1 ASR model at a time, which uses the entire NPU.
 - **CPU/GPU:** No inherent limits beyond available RAM. Multiple models can coexist on CPU or GPU.
 
+## Overriding a Backend's Slot Policy
+
+Each backend declares how its models share the machine (its `slot_policy`, listed per recipe in [`GET /system-info`](../../api/lemonade.md)). Set `slot_policy` in the backend's section of `config.json` to change that for one backend, for example to let a `halogen` model coexist with other local models on a host with enough memory:
+
+```bash
+lemonade config set halogen.slot_policy=standard
+```
+
+Accepted values are `standard`, `exclusive_npu`, `coexist_by_type`, `exclusive_host` and `unmetered`; an empty string, or no key, keeps the backend's own policy. The override applies to every model of that backend, and is read on each load, so it takes effect for the next model you load. Overriding to a policy the hardware cannot honor (for example `standard` for a backend that needs the whole NPU) is the operator's call. `/system-info` keeps reporting the backend's own policy.
+
 ## Eviction Policy
 
 When a model slot is full:

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <map>
+#include <optional>
 #include <string>
 #include <utility>
 #include <vector>
@@ -67,6 +68,17 @@ inline const char* slot_policy_to_string(SlotPolicy p) {
         case SlotPolicy::Unmetered:     return "unmetered";
     }
     return "standard";
+}
+
+// Inverse of slot_policy_to_string(); nullopt for an unrecognised name.
+inline std::optional<SlotPolicy> slot_policy_from_string(const std::string& name) {
+    for (const SlotPolicy p : {SlotPolicy::Standard, SlotPolicy::ExclusiveNpu, SlotPolicy::CoexistByType,
+                               SlotPolicy::ExclusiveHost, SlotPolicy::Unmetered}) {
+        if (name == slot_policy_to_string(p)) {
+            return p;
+        }
+    }
+    return std::nullopt;
 }
 
 // Plain data declaring *what a backend is*. This is the single object the

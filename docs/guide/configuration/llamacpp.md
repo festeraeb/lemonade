@@ -198,6 +198,41 @@ lemonade config set rocm_channel=nightly
 lemonade config set llamacpp.rocm_bin=b1260
 ```
 
+## Passing llama-server Arguments
+
+`llamacpp_args` (`llamacpp.args` in `config.json`, `--llamacpp-args` on `lemonade load`) is appended to the llama-server command line. Arguments you set there take precedence over Lemonade's defaults wherever a default exists:
+
+- Lemonade does not pass `-ngl` / `--gpu-layers`, so llama-server's own offload choice applies and `-ngl 20` (or `--gpu-layers 20`) in `llamacpp_args` is passed through as written. This is how to let a model that does not fit in memory spill to system RAM.
+- On a CPU backend Lemonade adds `--no-mmproj-offload` for models with a projector. A `--no-mmproj-offload` or `--mmproj-offload` of your own replaces it. On a GPU backend nothing is added, so `--no-mmproj-offload` keeps the projector out of VRAM.
+- RoPE / YaRN recipe options (below) yield to the same flag in `llamacpp_args`.
+
+A small set of flags is still managed by Lemonade because it must know their values: `-m`, `--ctx-size`, `--port`, `--device`, `--jinja`, `--mmproj`, `--model-draft`, `--embeddings` and `--reranking` (with their aliases). Passing one of these is rejected with an error that lists them.
+
+## Extending Context with RoPE / YaRN Scaling
+
+A model can be run past its trained context by scaling its rotary position embeddings. Lemonade exposes llama-server's RoPE and YaRN flags as recipe options. Each one is passed to llama-server only when it is set; leave one unset and llama-server uses the value stored in the model.
+
+| Recipe option | CLI flag (`lemonade load`) | llama-server flag |
+|---|---|---|
+| `llamacpp_rope_scaling` (`none`, `linear`, `yarn`) | `--llamacpp-rope-scaling` | `--rope-scaling` |
+| `llamacpp_rope_scale` | `--llamacpp-rope-scale` | `--rope-scale` |
+| `llamacpp_rope_freq_base` | `--llamacpp-rope-freq-base` | `--rope-freq-base` |
+| `llamacpp_rope_freq_scale` | `--llamacpp-rope-freq-scale` | `--rope-freq-scale` |
+| `llamacpp_yarn_orig_ctx` | `--llamacpp-yarn-orig-ctx` | `--yarn-orig-ctx` |
+| `llamacpp_yarn_ext_factor` | `--llamacpp-yarn-ext-factor` | `--yarn-ext-factor` |
+| `llamacpp_yarn_attn_factor` | `--llamacpp-yarn-attn-factor` | `--yarn-attn-factor` |
+| `llamacpp_yarn_beta_slow` | `--llamacpp-yarn-beta-slow` | `--yarn-beta-slow` |
+| `llamacpp_yarn_beta_fast` | `--llamacpp-yarn-beta-fast` | `--yarn-beta-fast` |
+
+For example, to run a model with a native 262144-token window at four times that length:
+
+```bash
+lemonade load Qwen3-0.6B-GGUF --ctx-size 1048576 \
+  --llamacpp-rope-scaling yarn --llamacpp-rope-scale 4 --llamacpp-yarn-orig-ctx 262144
+```
+
+The same keys work in `recipe_options.json`, in a model's options, and in the `/api/v1/load` body. If you also spell one of these flags in `llamacpp_args`, the value in `llamacpp_args` is used and the recipe option for that flag is ignored.
+
 ## Choosing the Right Backend
 
 ### Decision Tree

@@ -188,7 +188,7 @@ void OpenMossServer::load(const std::string& model_name,
 ServerCommand OpenMossServer::server_command(const std::string& model_path) const {
     ServerCommand command;
     command.program = exe_path_;
-    command.port = utils::ProcessManager::find_free_port(8001);
+    command.port = utils::ProcessManager::find_free_port(RuntimeConfig::backend_port_base_or_default());
     if (command.port <= 0) {
         throw std::runtime_error("Failed to find an available port");
     }

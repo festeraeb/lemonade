@@ -3,6 +3,7 @@
 #include "lemon/backends/llamacpp/llamacpp_gguf.h"
 #include "lemon/backends/llamacpp/llamacpp_request.h"
 #include "lemon/backends/llamacpp/llamacpp_systemone.h"
+#include "lemon/backends/llamacpp/llamacpp_tuning.h"
 #include "llamacpp_system_utils.h"
 #include "lemon/backends/backend_registry.h"
 #include "lemon/backends/backend_ops.h"
@@ -414,7 +415,10 @@ void LlamaCppServer::load(const std::string& model_name,
         push_arg(args, reserved_flags, "--mmproj", mmproj_path);
         if (!use_gpu) {
             LOG(DEBUG, "LlamaCpp") << "Skipping mmproj argument since GPU mode is not enabled" << std::endl;
-            push_arg(args, reserved_flags, "--no-mmproj-offload");
+            // Not reserved: a user's own --no-mmproj-offload / --mmproj-offload wins.
+            if (llamacpp::should_add_no_mmproj_offload(use_gpu, parse_custom_args(llamacpp_args))) {
+                args.push_back("--no-mmproj-offload");
+            }
         }
     }
     push_reserved(reserved_flags, "--mmproj", std::vector<std::string>{"-mm", "-mmu", "--mmproj-url", "--no-mmproj", "--mmproj-auto", "--no-mmproj-auto"});
@@ -470,6 +474,14 @@ void LlamaCppServer::load(const std::string& model_name,
                                   << ctx_size << " tokens)" << std::endl;
         }
         encoder_max_input_tokens_ = batch.max_input_tokens;
+    }
+
+    // RoPE / YaRN scaling options, passed only when set. A flag the user spelled
+    // in llamacpp_args wins and is not duplicated here.
+    {
+        const std::vector<std::string> rope_args =
+            llamacpp::build_rope_args(options, parse_custom_args(llamacpp_args));
+        args.insert(args.end(), rope_args.begin(), rope_args.end());
     }
 
     // Validate and append custom arguments

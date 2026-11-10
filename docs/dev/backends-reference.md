@@ -132,6 +132,15 @@ Each backend has a tier and a format; see [Backend Tiers and Formats](../api/lem
 | `llamacpp_backend` | `--llamacpp` | BACKEND | "" | LlamaCpp backend to use |
 | `llamacpp_device` | `--llamacpp-device` | DEVICES | "" | Comma-separated list of accelerator devices to use (e.g. Vulkan0) |
 | `llamacpp_args` | `--llamacpp-args` | ARGS | "" | Custom arguments to pass to llama-server |
+| `llamacpp_rope_scaling` | `--llamacpp-rope-scaling` | TYPE | "" | RoPE scaling type: none, linear or yarn (unset = from the model) |
+| `llamacpp_rope_scale` | `--llamacpp-rope-scale` | SIZE | -1.0 | RoPE context scaling factor, expands context by this factor (unset = from the model) |
+| `llamacpp_rope_freq_base` | `--llamacpp-rope-freq-base` | SIZE | -1.0 | RoPE base frequency, used by NTK-aware scaling (unset = from the model) |
+| `llamacpp_rope_freq_scale` | `--llamacpp-rope-freq-scale` | SIZE | -1.0 | RoPE frequency scaling factor, expands context by 1/factor (unset = from the model) |
+| `llamacpp_yarn_orig_ctx` | `--llamacpp-yarn-orig-ctx` | SIZE | -1 | YaRN original context size of the model (unset = from the model) |
+| `llamacpp_yarn_ext_factor` | `--llamacpp-yarn-ext-factor` | SIZE | -1.0 | YaRN extrapolation mix factor, 0.0 = full interpolation (unset = from the model) |
+| `llamacpp_yarn_attn_factor` | `--llamacpp-yarn-attn-factor` | SIZE | -1.0 | YaRN scale sqrt(t) or attention magnitude (unset = from the model) |
+| `llamacpp_yarn_beta_slow` | `--llamacpp-yarn-beta-slow` | SIZE | -1.0 | YaRN high correction dimension or alpha (unset = from the model) |
+| `llamacpp_yarn_beta_fast` | `--llamacpp-yarn-beta-fast` | SIZE | -1.0 | YaRN low correction dimension or beta (unset = from the model) |
 
 #### `llamacpp-hrx` — HRX GPU
 
