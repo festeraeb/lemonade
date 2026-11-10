@@ -16,6 +16,10 @@ static int body() {
           (E{{"CUDA_VISIBLE_DEVICES", "GPU-abc"}, {"GGML_CUDA_NO_PINNED", "1"}}));
     CHECK(build_env(json{{"NAUTIBURN_CLASS_ID", "live-x"}, {"TZ", "UTC"}}, vals, dirs).size() == 2);
 
+    // LB_ (lemonade-burn: LB_WGPU_DEVICE, LB_THREADS) is allowed; LBX and bare LB are not
+    CHECK(build_env(json{{"LB_WGPU_DEVICE", "{device}"}, {"LB_THREADS", "8"}}, vals, dirs).size() == 2);
+    THROWS(build_env(json{{"LBX_Y", "1"}}, vals, dirs), "LBX_Y");
+
     // denied names are named in the message
     THROWS(build_env(json{{"LD_PRELOAD", "/tmp/x.so"}}, vals, dirs), "LD_PRELOAD");
     THROWS(build_env(json{{"PATH", "/tmp"}}, vals, dirs), "PATH");
