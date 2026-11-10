@@ -284,15 +284,18 @@ bool Router::reload_model_after_watchdog_reset(const std::string& requested_mode
 
 // Slot/eviction policy for a recipe, from its descriptor (default Standard).
 // This is the recipe-static policy used for pre-load slot decisions.
-static SlotPolicy slot_policy_for_recipe(const std::string& recipe) {
+static SlotPolicy slot_policy_for_recipe(const std::string& recipe, const RuntimeConfig* config) {
+    if (config) {
+        return config->slot_policy_for_recipe(recipe);
+    }
     if (const auto* desc = backends::descriptor_for(recipe)) {
         return desc->slot_policy;
     }
     return SlotPolicy::Standard;
 }
 
-static bool is_unmetered_recipe(const std::string& recipe) {
-    return slot_policy_for_recipe(recipe) == SlotPolicy::Unmetered;
+static bool is_unmetered_recipe(const std::string& recipe, const RuntimeConfig* config) {
+    return slot_policy_for_recipe(recipe, config) == SlotPolicy::Unmetered;
 }
 
 int Router::count_servers_in_pool(ModelType type,
@@ -302,7 +305,7 @@ int Router::count_servers_in_pool(ModelType type,
     for (const auto& server : loaded_servers_) {
         // Unmetered backends (cloud) consume no local memory and therefore do
         // not consume either a standard or routing-helper capacity slot.
-        if (is_unmetered_recipe(server->get_recipe_options().get_recipe())) {
+        if (is_unmetered_recipe(server->get_recipe_options().get_recipe(), config_)) {
             continue;
         }
         if (server->is_backend_alive() &&
@@ -327,7 +330,7 @@ WrappedServer* Router::find_lru_server_in_pool(
     for (const auto& server : loaded_servers_) {
         // Unmetered backends (cloud) are not eviction candidates; they have no
         // local memory cost and retain provider/upstream bindings while warm.
-        if (is_unmetered_recipe(server->get_recipe_options().get_recipe())) {
+        if (is_unmetered_recipe(server->get_recipe_options().get_recipe(), config_)) {
             continue;
         }
         if (server->is_backend_alive() &&
@@ -376,7 +379,7 @@ void Router::transition_server_residency_locked(
         return;
     }
 
-    if (!is_unmetered_recipe(server->get_recipe_options().get_recipe())) {
+    if (!is_unmetered_recipe(server->get_recipe_options().get_recipe(), config_)) {
         // Admit into the destination pool before changing the live role. Standard
         // admission remains type-wide; helper admission is keyed by model name.
         ensure_residency_capacity(
@@ -635,7 +638,7 @@ WrappedServer* Router::find_npu_server_by_recipe(const std::string& recipe) cons
 WrappedServer* Router::find_coexisting_server_by_type(ModelType type) const {
     for (const auto& server : loaded_servers_) {
         if (server->is_backend_alive() &&
-            slot_policy_for_recipe(server->get_recipe_options().get_recipe()) ==
+            slot_policy_for_recipe(server->get_recipe_options().get_recipe(), config_) ==
                 SlotPolicy::CoexistByType &&
             server->get_model_type() == type) {
             return server.get();
@@ -968,14 +971,14 @@ void Router::load_model(const std::string& model_name,
         // A host-exclusive backend shares the machine with no other local model:
         // loading it evicts them all, and loading any other local model evicts it.
         // Cloud models hold no local memory and stay.
-        if (!is_unmetered_recipe(model_info.recipe)) {
+        if (!is_unmetered_recipe(model_info.recipe, config_)) {
             const bool exclusive_load =
-                slot_policy_for_recipe(model_info.recipe) == SlotPolicy::ExclusiveHost;
+                slot_policy_for_recipe(model_info.recipe, config_) == SlotPolicy::ExclusiveHost;
             std::vector<std::pair<WrappedServer*, std::string>> displaced;
             for (const auto& server : loaded_servers_) {
                 if (!server->is_backend_alive()) continue;
                 const std::string recipe = server->get_recipe_options().get_recipe();
-                const SlotPolicy policy = slot_policy_for_recipe(recipe);
+                const SlotPolicy policy = slot_policy_for_recipe(recipe, config_);
                 if (policy == SlotPolicy::Unmetered) continue;
                 if (!exclusive_load && policy != SlotPolicy::ExclusiveHost) continue;
                 const std::string reason =
@@ -1000,7 +1003,7 @@ void Router::load_model(const std::string& model_name,
         //   CoexistByType (flm): coexist with other FLM types (max 1 per type),
         //                but evict exclusive-NPU peers.
         // Standard/Unmetered backends share no device exclusivity.
-        switch (slot_policy_for_recipe(model_info.recipe)) {
+        switch (slot_policy_for_recipe(model_info.recipe, config_)) {
             case SlotPolicy::ExclusiveNpu: {
                 // Hardware exclusivity is stronger than count-based pools. Never
                 // alternate a router helper and its candidate across the same NPU:
@@ -1031,7 +1034,7 @@ void Router::load_model(const std::string& model_name,
                 std::vector<WrappedServer*> exclusive_peers;
                 for (const auto& server : loaded_servers_) {
                     if (server->is_backend_alive() && (server->get_device_type() & DEVICE_NPU) &&
-                        slot_policy_for_recipe(server->get_recipe_options().get_recipe()) !=
+                        slot_policy_for_recipe(server->get_recipe_options().get_recipe(), config_) !=
                             SlotPolicy::CoexistByType) {
                         if (should_reject_residency_displacement(
                                 requested_residency_class,
@@ -1077,7 +1080,7 @@ void Router::load_model(const std::string& model_name,
         // Count-based LRU is scoped to (ModelType, ResidencyClass). A local
         // routing helper therefore does not consume or evict a normal candidate
         // slot of the same ModelType. Cloud remains unmetered and outside both pools.
-        const bool is_unmetered_load = is_unmetered_recipe(model_info.recipe);
+        const bool is_unmetered_load = is_unmetered_recipe(model_info.recipe, config_);
         if (!is_unmetered_load) {
             ensure_residency_capacity(model_type, requested_residency_class,
                                       canonical_model_name);
@@ -1430,7 +1433,7 @@ json Router::get_all_loaded_models() const {
         model_info["type"] = model_type_to_string(server->get_model_type());
         model_info["residency_class"] = residency_class_to_string(server->get_residency_class());
         model_info["slot_pool"] = is_unmetered_recipe(
-            server->get_recipe_options().get_recipe())
+            server->get_recipe_options().get_recipe(), config_)
             ? "unmetered"
             : residency_pool_to_string(
                   server->get_model_type(), server->get_residency_class());
@@ -3062,7 +3065,7 @@ int Router::count_pinned_servers_in_pool(
     ResidencyClass residency_class) const {
     int count = 0;
     for (const auto& server : loaded_servers_) {
-        if (is_unmetered_recipe(server->get_recipe_options().get_recipe())) {
+        if (is_unmetered_recipe(server->get_recipe_options().get_recipe(), config_)) {
             continue;
         }
         if (server->is_backend_alive() &&

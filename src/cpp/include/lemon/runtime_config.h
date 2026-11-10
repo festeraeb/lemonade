@@ -12,6 +12,8 @@
 
 namespace lemon {
 
+enum class SlotPolicy;
+
 using json = nlohmann::json;
 
 // Callback invoked after config changes are applied (outside the lock).
@@ -97,6 +99,11 @@ public:
     bool backend_bool(const std::string& backend, const std::string& key) const;
     int backend_int(const std::string& backend, const std::string& key) const;
     double backend_double(const std::string& backend, const std::string& key) const;
+
+    /// Slot/eviction policy for a recipe: the `slot_policy` key of the recipe's
+    /// config section when set (e.g. `{"halogen": {"slot_policy": "standard"}}`),
+    /// otherwise the backend descriptor's policy.
+    SlotPolicy slot_policy_for_recipe(const std::string& recipe) const;
 
     /// Returns recipe options in the flat format that RecipeOptions/backends expect.
     /// Maps nested config to flat keys: llamacpp.backend -> llamacpp_backend,

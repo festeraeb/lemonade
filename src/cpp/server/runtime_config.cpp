@@ -45,6 +45,16 @@ static bool is_backend_name(const std::string& key) {
     return false;
 }
 
+// Unlike is_backend_name(), this includes container-only recipes with no binary.
+static bool is_recipe_section(const std::string& key) {
+    for (const auto* desc : lemon::backends::all_descriptors()) {
+        if (desc->effective_config_section() == key) {
+            return true;
+        }
+    }
+    return false;
+}
+
 // A config section has a selectable "backend" key iff its descriptor opts in.
 static bool has_backend_selection(const std::string& config_section) {
     for (const auto* desc : lemon::backends::all_descriptors()) {
@@ -445,6 +455,23 @@ void RuntimeConfig::set_broadcast_override(std::optional<bool> override_val) {
 long RuntimeConfig::global_timeout() const {
     std::shared_lock lock(mutex_);
     return config_["global_timeout"].get<long>();
+}
+
+SlotPolicy RuntimeConfig::slot_policy_for_recipe(const std::string& recipe) const {
+    const auto* desc = lemon::backends::descriptor_for(recipe);
+    const SlotPolicy descriptor_policy = desc ? desc->slot_policy : SlotPolicy::Standard;
+    const std::string section = desc ? desc->effective_config_section() : recipe;
+
+    std::shared_lock lock(mutex_);
+    if (!config_.contains(section) || !config_[section].is_object()) {
+        return descriptor_policy;
+    }
+    const json& section_config = config_[section];
+    if (!section_config.contains("slot_policy") || !section_config["slot_policy"].is_string()) {
+        return descriptor_policy;
+    }
+    const auto configured = slot_policy_from_string(section_config["slot_policy"].get<std::string>());
+    return configured.value_or(descriptor_policy);
 }
 
 int RuntimeConfig::backend_port_base() const {
@@ -1161,7 +1188,7 @@ void RuntimeConfig::validate(const std::string& key, const json& value) const {
                 }
             }
         }
-    } else if (is_backend_name(key)) {
+    } else if (is_recipe_section(key)) {
         if (!value.is_object()) {
             throw std::invalid_argument("'" + key + "' must be an object");
         }
@@ -1198,6 +1225,18 @@ void RuntimeConfig::validate_backend(const std::string& backend, const std::stri
         }
         validate_bin_path(backend, key, value.get<std::string>());
     }
+    else if (key == "slot_policy") {
+        // "" keeps the backend's own policy.
+        if (!value.is_string()) {
+            throw std::invalid_argument("'" + backend + "." + key + "' must be a string");
+        }
+        const std::string policy = value.get<std::string>();
+        if (!policy.empty() && !slot_policy_from_string(policy)) {
+            throw std::invalid_argument(
+                "'" + backend + "." + key + "' must be one of standard, exclusive_npu, "
+                "coexist_by_type, exclusive_host, unmetered (or \"\" for the backend default)");
+        }
+    }
     else if (key == "prefer_system") {
         if (!value.is_boolean()) {
             throw std::invalid_argument("'" + backend + "." + key + "' must be a boolean");
@@ -1232,7 +1271,7 @@ void RuntimeConfig::validate_backend(const std::string& backend, const std::stri
 
 void RuntimeConfig::apply_changes(const json& changes, json& applied_diff) {
     for (auto& [key, value] : changes.items()) {
-        if (value.is_object() && is_backend_name(key)) {
+        if (value.is_object() && is_recipe_section(key)) {
             // Merge nested backend changes; record per-sub-key diffs.
             if (!config_.contains(key)) {
                 config_[key] = json::object();

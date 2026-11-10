@@ -257,6 +257,8 @@ Backend-specific settings are nested under their backend name:
 | `prefer_system` | false | Prefer system-installed llama.cpp over bundled |
 | `*_bin` | "builtin" | Backend binary selection — see [Backend binary selection](#backend-binary-selection) |
 
+Every backend section also accepts an optional `slot_policy` (`standard`, `exclusive_npu`, `coexist_by_type`, `exclusive_host`, `unmetered`) that overrides how that backend's models share the machine; unset keeps the backend's own policy. See [Overriding a Backend's Slot Policy](multi-model.md#overriding-a-backends-slot-policy).
+
 **whispercpp** — Audio transcription:
 | Key | Default | Description |
 |-----|---------|-------------|
