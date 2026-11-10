@@ -3961,6 +3961,13 @@ if(BUILD_TESTING AND EXISTS "${_REQUEST_CANCELLATION_TEST_SRC}")
     add_cpp_ci_test(RequestCancellationTest CI ON COMMAND test_request_cancellation)
 endif()
 
+set(_UNLOAD_CANCELLATION_TEST_SRC "${CMAKE_CURRENT_SOURCE_DIR}/test/cpp/test_unload_cancellation.cpp")
+if(BUILD_TESTING AND EXISTS "${_UNLOAD_CANCELLATION_TEST_SRC}")
+    add_executable(test_unload_cancellation test/cpp/test_unload_cancellation.cpp)
+    target_link_libraries(test_unload_cancellation PRIVATE lemonade-server-core)
+    add_cpp_ci_test(UnloadCancellationTest CI ON COMMAND test_unload_cancellation)
+endif()
+
 set(_STREAMING_HEARTBEAT_TEST_SRC "${CMAKE_CURRENT_SOURCE_DIR}/test/cpp/test_streaming_heartbeat.cpp")
 if(BUILD_TESTING AND EXISTS "${_STREAMING_HEARTBEAT_TEST_SRC}")
     add_executable(test_streaming_heartbeat test/cpp/test_streaming_heartbeat.cpp)

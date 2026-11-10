@@ -18,6 +18,7 @@
 #include "backend_manager.h"
 #include "recipe_options.h"
 #include "streaming_proxy.h"
+#include "error_types.h"
 #include "backends/backend_descriptor.h"
 #include "server_process.h"
 #include "model_manager_types.h"
@@ -441,6 +442,13 @@ public:
     // Unload the model and stop the server
     virtual void unload() { stop_server(); }
 
+    // Marks the model as being torn down. Requests already running against it
+    // are cancelled at their next cancellation check and report
+    // ModelUnloadingException; requests that arrive afterwards are refused the
+    // same way. One-way: the object is destroyed after the unload completes.
+    void begin_unload() { unloading_.store(true, std::memory_order_release); }
+    bool is_unloading() const { return unloading_.load(std::memory_order_acquire); }
+
     void set_load_cancel_flag(std::atomic<bool>* f) { load_cancel_ = f; }
 
     class RequestCancelScope {
@@ -456,6 +464,11 @@ public:
     };
 
     static utils::RequestCancelToken current_request_cancel_context();
+
+    ModelUnloadingException unloading_exception() const;
+
+    // `token` extended so it also fires once the model is being unloaded.
+    utils::RequestCancelToken cancel_token_with_unload(const utils::RequestCancelToken& token) const;
 
     // Downsize the model on soft idle (e.g., clear KV cache). Returns true if the
     // downsize succeeded (or was a no-op), false if the backend operation failed.
@@ -675,6 +688,7 @@ protected:
     long load_duration_ms_;
     bool pinned_ = false;
     std::atomic<bool>* load_cancel_ = nullptr;
+    std::atomic<bool> unloading_{false};
 
 private:
     static uint64_t next_instance_id() {

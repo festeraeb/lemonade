@@ -11,6 +11,7 @@ using json = nlohmann::json;
 // Error types as constants
 namespace ErrorType {
     constexpr const char* MODEL_NOT_LOADED = "model_not_loaded";
+    constexpr const char* MODEL_UNLOADING = "model_unloading";
     constexpr const char* BACKEND_ERROR = "backend_error";
     constexpr const char* NETWORK_ERROR = "network_error";
     constexpr const char* INVALID_REQUEST = "invalid_request";
@@ -58,6 +59,24 @@ public:
     ModelNotLoadedException(const std::string& details = "")
         : LemonException("No model loaded" + (details.empty() ? "" : ": " + details),
                         ErrorType::MODEL_NOT_LOADED) {}
+};
+
+// The model is being unloaded: its in-flight requests are cancelled and new ones
+// are refused until the unload finishes. Retryable once the model is loaded
+// again, so it carries HTTP 503 rather than the 404 of a model that is simply
+// not loaded.
+class ModelUnloadingException : public LemonException {
+public:
+    explicit ModelUnloadingException(const std::string& model_name)
+        : LemonException("Model is being unloaded: " + model_name,
+                         ErrorType::MODEL_UNLOADING) {}
+
+    // Hides the base version (as BackendException does); call it on this type.
+    json to_json() const {
+        auto j = LemonException::to_json();
+        j["error"]["status_code"] = 503;
+        return j;
+    }
 };
 
 class SlotsPinnedException : public LemonException {

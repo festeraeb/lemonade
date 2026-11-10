@@ -1249,7 +1249,7 @@ A collection, which has no checkpoint of its own.
 ## `POST /v1/unload`
 <sub>![Status](https://img.shields.io/badge/status-fully_available-green)</sub>
 
-Unloads a model from memory, freeing it while `lemond` keeps running.
+Unloads a model from memory, freeing it while `lemond` keeps running. Requests still running against the model are cancelled: a streaming response ends with a final `model_unloading` error event, and a non-streaming request fails with HTTP 503. Requests that arrive while the model is being unloaded are refused the same way instead of waiting.
 
 Requires `LEMONADE_API_KEY` when it is set.
 
