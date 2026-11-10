@@ -2694,6 +2694,20 @@ if(BUILD_TESTING AND EXISTS "${_LATEST_FALLBACK_TEST_SRC}")
     add_cpp_ci_test(LatestVersionFallbackTest CI ON COMMAND test_latest_version_fallback)
 endif()
 
+# Policy for loaded models when a backend's *_bin value changes
+# (lemon::plan_bin_change). Header-only, so the test links nothing beyond the
+# standard library.
+set(_BIN_CHANGE_PLAN_TEST_SRC
+    "${CMAKE_CURRENT_SOURCE_DIR}/test/cpp/test_bin_change_plan.cpp"
+)
+if(BUILD_TESTING AND EXISTS "${_BIN_CHANGE_PLAN_TEST_SRC}")
+    add_executable(test_bin_change_plan test/cpp/test_bin_change_plan.cpp)
+    target_include_directories(test_bin_change_plan PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/cpp/include
+    )
+    add_cpp_ci_test(BinChangePlanTest CI ON COMMAND test_bin_change_plan)
+endif()
+
 # Label-to-deployment-mode mapping (lemon::get_model_type_from_labels). Header-only,
 # so the test links nothing beyond the standard library.
 set(_MODEL_TYPE_CLASSIFIER_TEST_SRC

@@ -400,7 +400,9 @@ lemonade config set llamacpp.vulkan_bin=builtin
 
 #### Behavior when `*_bin` changes
 
-Changing a `*_bin` value applies live: lemonade unloads any model currently using that backend, downloads the new binary if needed, and reloads the model on the new binary. No `lemond` restart is required.
+Changing a `*_bin` value applies live: lemonade downloads the new binary if needed and uses it for every model loaded afterwards. Models that are already loaded keep running on the binary they started with, so an in-flight request and its KV cache are not lost; unload and load a model to move it to the new binary. No `lemond` restart is required.
+
+On Windows a running executable cannot be replaced, so there lemonade unloads the models that use the changed backend, installs the new binary and reloads them on it.
 
 #### `latest` re-resolution
 

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <string>
+#include <vector>
 
 // Pure decision logic for resolving a user's "latest" *_bin config pin into a
 // concrete release tag. Kept free of I/O (no network, no filesystem, no global
@@ -52,6 +53,46 @@ inline LatestPinResolution resolve_latest_pin(const std::string& recipe,
         ? "offline mode and no installed version found"
         : "GitHub lookup failed and no installed version found";
     return {"", "Cannot resolve 'latest' for " + recipe + ":" + backend + ": " + why, false};
+}
+
+// A loaded model as seen by the *_bin change policy.
+struct LoadedBackendUse {
+    std::string model_name;
+    std::string recipe;
+    // The backend the model's recipe options pin; empty when it follows the
+    // recipe default and so could resolve to the changed backend on next load.
+    std::string pinned_backend;
+};
+
+struct BinChangePlan {
+    // Models to unload before the new binary is installed, and to reload on it.
+    std::vector<std::string> unload_and_reload;
+    // Models left running on the binary they started with. They keep serving
+    // requests (and their KV cache) until they are unloaded; only later loads
+    // use the new binary.
+    std::vector<std::string> keep_running;
+};
+
+// What happens to loaded models when a (recipe, backend) *_bin value changes
+// (lemonade-sdk/lemonade#2161). Models of other recipes, and models pinned to a
+// different backend, are never affected.
+//
+// binary_replaceable_while_running is true where the installer can replace a
+// backend directory under a running process (Linux and macOS unlink the old
+// files). Windows cannot delete a running executable, so there the affected
+// models must be unloaded first, as they always were.
+inline BinChangePlan plan_bin_change(const std::vector<LoadedBackendUse>& loaded,
+                                     const std::string& recipe,
+                                     const std::string& backend,
+                                     bool binary_replaceable_while_running) {
+    BinChangePlan plan;
+    for (const auto& use : loaded) {
+        if (use.model_name.empty() || use.recipe != recipe) continue;
+        if (!use.pinned_backend.empty() && use.pinned_backend != backend) continue;
+        (binary_replaceable_while_running ? plan.keep_running : plan.unload_and_reload)
+            .push_back(use.model_name);
+    }
+    return plan;
 }
 
 } // namespace lemon

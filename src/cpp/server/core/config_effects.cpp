@@ -6,6 +6,7 @@
 #include <lemon/utils/aixlog.hpp>
 
 #include "lemon/backend_manager.h"
+#include "lemon/backend_version_policy.h"
 #include "lemon/logging_config.h"
 #include "lemon/model_manager.h"
 #include "lemon/router.h"
@@ -113,26 +114,40 @@ void ConfigEffects::apply_bin_change(const std::string& section,
                         << " = '" << new_value << "' — hot-swapping "
                         << recipe << ":" << backend << std::endl;
 
-    // Snapshot loaded models on this (recipe, backend). A model whose options
-    // do not pin a backend (mb empty) is treated as potentially affected since
-    // it could resolve to the changed backend on next load.
+    // Models already running keep the binary they started with: unloading one
+    // throws away its KV cache and interrupts its requests. Only a platform
+    // that cannot replace a running executable has to unload them first.
+#ifdef _WIN32
+    constexpr bool kReplaceableWhileRunning = false;
+#else
+    constexpr bool kReplaceableWhileRunning = true;
+#endif
+    std::vector<LoadedBackendUse> loaded_uses;
+    const std::string backend_option_key = recipe + "_backend";
+    for (const auto& m : router.get_all_loaded_models()) {
+        LoadedBackendUse use;
+        use.model_name = m.value("model_name", "");
+        use.recipe = m.value("recipe", "");
+        if (m.contains("recipe_options") && m["recipe_options"].contains(backend_option_key)) {
+            use.pinned_backend = m["recipe_options"].value(backend_option_key, "");
+        }
+        loaded_uses.push_back(std::move(use));
+    }
+    const BinChangePlan plan =
+        plan_bin_change(loaded_uses, recipe, backend, kReplaceableWhileRunning);
+
     struct Saved {
         std::string name;
         RecipeOptions opts;
     };
     std::vector<Saved> previously_loaded;
-    auto loaded = router.get_all_loaded_models();
-    std::string backend_option_key = recipe + "_backend";
-    for (const auto& m : loaded) {
-        if (m.value("recipe", "") != recipe) continue;
-        std::string mb;
-        if (m.contains("recipe_options") && m["recipe_options"].contains(backend_option_key)) {
-            mb = m["recipe_options"].value(backend_option_key, "");
-        }
-        if (!mb.empty() && mb != backend) continue;
-        std::string name = m.value("model_name", "");
-        if (name.empty()) continue;
+    for (const auto& name : plan.unload_and_reload) {
         previously_loaded.push_back({name, router.get_model_recipe_options(name)});
+    }
+    for (const auto& name : plan.keep_running) {
+        LOG(INFO, "Server") << name << " keeps running on its current " << recipe << ":"
+                            << backend << " binary; the new binary applies when it is next loaded"
+                            << std::endl;
     }
 
     for (const auto& s : previously_loaded) {
