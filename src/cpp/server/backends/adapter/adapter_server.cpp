@@ -147,8 +147,7 @@ void AdapterServer::load(const std::string& model_name, const ModelInfo& model_i
     const std::string ready_path = ready.value("path", std::string("/v1/models"));
     const long ready_timeout = ready.value("timeout_s", 600L);
     const std::string ready_field = ready.value("json_field", std::string{});
-    const json ready_values = ready.value("ready_values", json::array());
-    const json error_values = ready.value("error_values", json::array());
+    const auto load_started = std::chrono::steady_clock::now();
     // identity.unreported: the engine's /v1/models carries no owned_by (Strata, PolyStrata, Nauti-Strata), so the
     // check cannot pass; the spec still names the owner for make_adapter, and the plane skips the check.
     const json identity = spec.value("identity", json::object());
@@ -186,6 +185,15 @@ void AdapterServer::load(const std::string& model_name, const ModelInfo& model_i
         {"{model}", model_path}, {"{model_path}", model_path}, {"{port}", std::to_string(port_)}, {"{device}", device},
         {"{spec_dir}", spec_dir.string()}};
     subs["{gpu_uuids}"] = gpu_uuids;
+    // {ctx}: the context size lemond knows for this load, from the recipe's ctx_size, else the model's
+    // registered window. When neither is known the placeholder stays unsupplied and the spec is refused.
+    int64_t ctx = 0;
+    const json ctx_option = options.get_option("ctx_size");
+    if (ctx_option.is_number() && ctx_option.get<int64_t>() > 0) ctx = ctx_option.get<int64_t>();
+    else if (model_info.max_context_window > 0) ctx = model_info.max_context_window;
+    if (ctx > 0) subs["{ctx}"] = std::to_string(ctx);
+    // Health reports cpu unless the spec asked for a card.
+    device_type_ = adapter::specs::selects_gpu(spec, requested) ? DEVICE_GPU : DEVICE_CPU;
 
     std::vector<std::string> args;
     const std::string override_args = option_text(options, "adapter_args");
@@ -253,16 +261,26 @@ void AdapterServer::load(const std::string& model_name, const ModelInfo& model_i
 
     // A health route can answer before the engine is ready (e.g. while weights load).
     if (!ready_field.empty()) {
-        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(ready_timeout);
-        std::string last;
+        // The spec's timeout covers the whole load, including the wait start_server() already did.
+        const auto deadline = load_started + std::chrono::seconds(ready_timeout);
+        double last_progress = -1;
         while (true) {
+            std::string last;
+            adapter::specs::Readiness state{adapter::specs::ReadyState::Starting, -1};
             try {
-                last = forward_get_request(ready_path, 5).value(ready_field, std::string{});
+                const json status = forward_get_request(ready_path, 5);
+                last = status.value(ready_field, std::string{});
+                state = adapter::specs::ready_state(status, ready);
             } catch (...) {
-                last = "";
             }
-            if (contains(ready_values, last)) break;
-            if (contains(error_values, last) || std::chrono::steady_clock::now() > deadline) {
+            using adapter::specs::ReadyState;
+            if (state.state == ReadyState::Ready || state.state == ReadyState::Warm) break;
+            if (state.state == ReadyState::Loading && state.progress >= 0 && state.progress != last_progress) {
+                last_progress = state.progress;
+                LOG(INFO, "Adapter") << name << " loading " << static_cast<int>(state.progress * 100) << "%"
+                                     << std::endl;
+            }
+            if (state.state == ReadyState::Error || std::chrono::steady_clock::now() > deadline) {
                 stop_server();
                 throw std::runtime_error("adapter " + name + ": engine did not become ready (" + ready_field +
                                          "=\"" + last + "\")");

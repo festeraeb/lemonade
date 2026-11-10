@@ -611,6 +611,22 @@ json memory_telemetry(const json& body) {
 }
 
 
+bool selects_gpu(const json& spec, const std::string& requested) {
+    if (!requested.empty()) return true;
+    if (spec.is_object() && spec.contains("default_device_index")) {
+        const json& d = spec["default_device_index"];
+        if (d.is_number() || (d.is_string() && !d.get<std::string>().empty())) return true;
+    }
+    for (const char* key : {"args", "env"}) {
+        if (!spec.is_object() || !spec.contains(key)) continue;
+        const std::string text = spec[key].dump();
+        if (text.find("{device}") != std::string::npos || text.find("{gpu_uuids}") != std::string::npos) {
+            return true;
+        }
+    }
+    return false;
+}
+
 DeviceValues device_values(const std::string& requested, const std::string& spec_default, const std::vector<Gpu>& inventory) {
     // Helper to trim leading/trailing whitespace
     auto trim = [](std::string s) -> std::string {

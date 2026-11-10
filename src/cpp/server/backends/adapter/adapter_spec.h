@@ -178,6 +178,10 @@ struct Readiness {
 // 100, anything else gives -1.
 Readiness ready_state(const json& status, const json& ready_spec);
 
+// True when the spec asks for a GPU: a device was requested, the spec names a default_device_index, or
+// its args or env use {device} or {gpu_uuids}. False means the engine runs on the CPU.
+bool selects_gpu(const json& spec, const std::string& requested);
+
 }  // namespace specs
 }  // namespace adapter
 }  // namespace backends
