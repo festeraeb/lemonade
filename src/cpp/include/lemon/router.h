@@ -255,6 +255,12 @@ public:
 
     json get_stats() const;
 
+    // What each loaded engine reports through WrappedServer::get_additional_telemetry(), keyed by model name:
+    // {"<model>": {"<key>": value}}. Backends that report nothing are left out. Each engine is pinned for one
+    // short call made off the request thread; an engine that has not answered within the budget gets
+    // {"error": "telemetry timed out"} and /stats moves on. No router lock is held across the call.
+    json collect_engine_telemetry(std::chrono::milliseconds budget = std::chrono::milliseconds(3000)) const;
+
     // Get loaded backend metadata and per-model telemetry for metrics rendering.
     json get_metrics_snapshot() const;
 
