@@ -149,7 +149,11 @@ void AdapterServer::load(const std::string& model_name, const ModelInfo& model_i
     const std::string ready_field = ready.value("json_field", std::string{});
     const json ready_values = ready.value("ready_values", json::array());
     const json error_values = ready.value("error_values", json::array());
-    const std::string owned_by = spec.value("identity", json::object()).value("owned_by", std::string{});
+    // identity.unreported: the engine's /v1/models carries no owned_by (Strata, PolyStrata, Nauti-Strata), so the
+    // check cannot pass; the spec still names the owner for make_adapter, and the plane skips the check.
+    const json identity = spec.value("identity", json::object());
+    const std::string owned_by =
+        identity.value("unreported", false) ? std::string{} : identity.value("owned_by", std::string{});
     completion_ = spec.value("completion", true);
     telemetry_path_ = spec.value("telemetry_path", std::string{});
     memory_path_ = spec.value("memory_path", std::string{});

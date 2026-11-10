@@ -32,6 +32,8 @@ specs["fake-bundle"] = dict(base, binary=T + "/engine/bin/fake_engine.py", args=
 # R11: {gpu_uuids} carries the card's UUID; a UUID request resolves to its index for {device}.
 specs["fake-uuid"] = dict(base, args=["--port", "{port}", "--index", "{device}"],
                           env=dict(base["env"], CUDA_VISIBLE_DEVICES="{gpu_uuids}", LEMONADE_ENGINE_RECORD=T + "/record-uuid.json"))
+specs["fake-wrongowner"] = dict(base, args=["--port", "{port}"], identity={"owned_by": "someone-else"})
+specs["fake-unreported"] = dict(base, args=["--port", "{port}"], identity={"owned_by": "someone-else", "unreported": True})
 specs["fake-memory"] = dict(base, args=["--port", "{port}"], memory_path="/memory")
 for n, s in specs.items():
     json.dump(s, open(f"{T}/adapters/{n}.json", "w"), indent=1)
@@ -128,6 +130,11 @@ try:
         check("an unknown UUID is refused naming it", st >= 400 and "GPU-00000000" in body, f"status {st}: {body[:160]}")
     else:
         print("SKIP R11 checks: no NVIDIA card on this host")
+    st, body = call("/api/v1/load", {"model_name": "fake-unreported"})
+    check("identity.unreported skips the owned_by check", st == 200, f"status {st}: {body[:160]}")
+    call("/api/v1/unload", {"model_name": "fake-unreported"})
+    st, body = call("/api/v1/load", {"model_name": "fake-wrongowner"})
+    check("a wrong owned_by is refused naming it", st >= 400 and "owned_by=someone-else" in body, f"status {st}: {body[:160]}")
     for model, needle in (("fake-preload", "LD_PRELOAD"), ("fake-badph", "{shell}"), ("fake-libpath", "/tmp/evil"), ("fake-nobinary", "binary")):
         st, body = call("/api/v1/load", {"model_name": model})
         check(f"{model} refused naming {needle}", st >= 400 and needle in body, f"status {st}: {body[:160]}")
