@@ -479,6 +479,21 @@ sudo systemctl restart lemond
 # Then quit and relaunch from the Start Menu
 ```
 
+## Network Proxy
+
+`lemond` sends model downloads, backend downloads, Hugging Face and GitHub API calls and other outgoing HTTPS requests through a proxy when the standard environment variables are set in the `lemond` process environment:
+
+| Variable | Used for |
+| --- | --- |
+| `HTTPS_PROXY` / `https_proxy` | `https://` requests |
+| `HTTP_PROXY` / `http_proxy` | `http://` requests |
+| `ALL_PROXY` / `all_proxy` | Either scheme, when the specific variable is unset |
+| `NO_PROXY` / `no_proxy` | Comma-separated hosts, domains or CIDR ranges that connect directly |
+
+If both spellings of a variable are set, the lowercase one wins. A proxy value without a scheme is treated as `http://`; `socks5://` proxies are accepted. A proxy URL may carry credentials (`http://user:pass@proxy:3128`), which are never logged. Loopback (`localhost`, `127.0.0.1`, `::1`) is always exempt, and requests to the llama.cpp and other backends that `lemond` manages on loopback never use a proxy. With none of these variables set, nothing changes.
+
+For a `systemd` service, set the variables in the unit's environment, for example with `systemctl edit lemond` and an `Environment="HTTPS_PROXY=http://proxy.example:3128"` line.
+
 ## lemond CLI
 
 ```

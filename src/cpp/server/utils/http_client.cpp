@@ -1,5 +1,6 @@
 #include <lemon/utils/http_client.h>
 #include <lemon/utils/path_utils.h>
+#include <lemon/utils/proxy_utils.h>
 #include <lemon/utils/aixlog.hpp>
 #include <curl/curl.h>
 #include <iomanip>
@@ -679,6 +680,25 @@ bool apply_http_security_policy(
 } // namespace
 
 namespace {
+// Routes the request through the proxy named by the standard environment
+// variables (see proxy_utils.h). Always sets CURLOPT_PROXY explicitly, to ""
+// when there is none, so libcurl's own environment handling cannot send a
+// loopback or opted-out request through a proxy. The proxy URL can carry
+// credentials, so it is never logged.
+bool apply_proxy_policy(CURL* curl, const std::string& url, HttpSecurityPolicy policy) {
+    const ProxySettings settings = resolve_proxy_settings(url, policy);
+    return curl_easy_setopt(curl, CURLOPT_PROXY, settings.proxy.c_str()) == CURLE_OK &&
+           curl_easy_setopt(curl, CURLOPT_NOPROXY, settings.no_proxy.c_str()) == CURLE_OK;
+}
+
+bool apply_request_policy(CURL* curl, const std::string& url, HttpSecurityPolicy policy,
+                          bool follow_redirects) {
+    return apply_http_security_policy(curl, policy, follow_redirects) &&
+           apply_proxy_policy(curl, url, policy);
+}
+}  // namespace
+
+namespace {
 
 // Returning short of the chunk size is how libcurl is told to abort a transfer.
 struct BodySink {
@@ -719,7 +739,7 @@ HttpResponse perform_request(const std::string& url,
     curl_easy_setopt(curl, CURLOPT_HEADERFUNCTION, response_header_callback);
     curl_easy_setopt(curl, CURLOPT_HEADERDATA, &response.headers);
     curl_easy_setopt(curl, CURLOPT_NOBODY, headers_only ? 1L : 0L);
-    if (!apply_http_security_policy(curl, policy, true)) {
+    if (!apply_request_policy(curl, url, policy, true)) {
         curl_easy_cleanup(curl);
         throw std::runtime_error("Failed to apply HTTP security policy");
     }
@@ -795,7 +815,7 @@ HttpResponse HttpClient::post(const std::string& url,
     curl_easy_setopt(curl, CURLOPT_WRITEDATA, &response_body);
     curl_easy_setopt(curl, CURLOPT_HEADERFUNCTION, response_header_callback);
     curl_easy_setopt(curl, CURLOPT_HEADERDATA, &response.headers);
-    if (!apply_http_security_policy(curl, policy, false)) {
+    if (!apply_request_policy(curl, url, policy, false)) {
         curl_easy_cleanup(curl);
         throw std::runtime_error("Failed to apply HTTP security policy");
     }
@@ -891,7 +911,7 @@ HttpResponse HttpClient::post_multipart(const std::string& url,
         curl_easy_setopt(curl, CURLOPT_XFERINFODATA, &cancel);
         curl_easy_setopt(curl, CURLOPT_NOPROGRESS, 0L);
     }
-    if (!apply_http_security_policy(curl, policy, false)) {
+    if (!apply_request_policy(curl, url, policy, false)) {
         curl_mime_free(mime);
         curl_easy_cleanup(curl);
         throw std::runtime_error("Failed to apply HTTP security policy");
@@ -996,7 +1016,7 @@ HttpResponse HttpClient::post_stream(const std::string& url,
         curl_easy_setopt(curl, CURLOPT_HEADERFUNCTION, response_header_callback);
         curl_easy_setopt(curl, CURLOPT_HEADERDATA, out_response_headers);
     }
-    if (!apply_http_security_policy(curl, policy, false)) {
+    if (!apply_request_policy(curl, url, policy, false)) {
         curl_easy_cleanup(curl);
         throw std::runtime_error("Failed to apply HTTP security policy");
     }
@@ -1103,7 +1123,7 @@ DownloadResult HttpClient::download_attempt(const std::string& url,
     }
 
     curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, write_file_callback);
-    if (!apply_http_security_policy(curl, policy, true)) {
+    if (!apply_request_policy(curl, url, policy, true)) {
         result.error_message = "Failed to apply HTTP security policy";
         fclose(fp);
         curl_easy_cleanup(curl);
@@ -1180,6 +1200,10 @@ DownloadResult HttpClient::download_attempt(const std::string& url,
     CURLcode res = CURLE_OK;
     for (;;) {
         curl_easy_setopt(curl, CURLOPT_URL, current_url.c_str());
+        if (!apply_proxy_policy(curl, current_url, policy)) {
+            res = CURLE_UNSUPPORTED_PROTOCOL;
+            break;
+        }
         res = curl_easy_perform(curl);
         if (res != CURLE_OK) {
             break;
@@ -1364,7 +1388,7 @@ DownloadResult HttpClient::download_attempt(const std::string& url,
             if (head_curl) {
                 curl_easy_setopt(head_curl, CURLOPT_URL, current_url.c_str());
                 curl_easy_setopt(head_curl, CURLOPT_NOBODY, 1L);  // HEAD request
-                if (!apply_http_security_policy(head_curl, policy, true)) {
+                if (!apply_request_policy(head_curl, current_url, policy, true)) {
                     curl_easy_cleanup(head_curl);
                     result.error_message = "Resume failed (HTTP 416) - could not apply security policy";
                     result.can_resume = false;
@@ -1728,7 +1752,7 @@ bool HttpClient::is_reachable(const std::string& url,
     curl_easy_setopt(curl, CURLOPT_USERAGENT, "lemon.cpp/1.0");
     curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, write_callback);
     curl_easy_setopt(curl, CURLOPT_WRITEDATA, &response_body);
-    if (!apply_http_security_policy(curl, policy, false)) {
+    if (!apply_request_policy(curl, url, policy, false)) {
         curl_easy_cleanup(curl);
         return false;
     }
