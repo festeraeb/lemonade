@@ -99,6 +99,11 @@ struct DownloadOptions {
     std::string expected_hash_algorithm;
 };
 
+// True for a libcurl failure that interrupts a transfer without saying anything
+// about the bytes already received, so the download keeps its partial file and
+// the retry resumes after it.
+bool is_retryable_transfer_error(int curl_code);
+
 class HttpClient {
 public:
     // curl reads CURLOPT_TIMEOUT 0 as "no timeout", which collides with the

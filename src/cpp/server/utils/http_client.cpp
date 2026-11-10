@@ -1091,6 +1091,28 @@ HttpResponse HttpClient::post_stream(const std::string& url,
     return response;
 }
 
+bool is_retryable_transfer_error(int curl_code) {
+    switch (static_cast<CURLcode>(curl_code)) {
+        case CURLE_COULDNT_CONNECT:
+        case CURLE_COULDNT_RESOLVE_HOST:
+        case CURLE_COULDNT_RESOLVE_PROXY:
+        case CURLE_OPERATION_TIMEDOUT:
+        case CURLE_SEND_ERROR:
+        case CURLE_RECV_ERROR:
+        case CURLE_GOT_NOTHING:
+        case CURLE_PARTIAL_FILE:
+        case CURLE_SSL_CONNECT_ERROR:
+        // A reset or framing error on one HTTP/2 stream (curl 16 and 92) is the
+        // same interruption as a dropped HTTP/1.1 connection: the bytes already
+        // on disk are good and the next request can start after them.
+        case CURLE_HTTP2:
+        case CURLE_HTTP2_STREAM:
+            return true;
+        default:
+            return false;
+    }
+}
+
 DownloadResult HttpClient::download_attempt(const std::string& url,
                                             const std::string& output_path,
                                             size_t resume_from,
@@ -1313,17 +1335,6 @@ DownloadResult HttpClient::download_attempt(const std::string& url,
         bool disk_full = false;
         const fs::path disk_space_probe_path = get_disk_space_probe_path(output_path_fs);
         switch (res) {
-            case CURLE_COULDNT_CONNECT:
-            case CURLE_COULDNT_RESOLVE_HOST:
-            case CURLE_COULDNT_RESOLVE_PROXY:
-            case CURLE_OPERATION_TIMEDOUT:
-            case CURLE_SEND_ERROR:
-            case CURLE_RECV_ERROR:
-            case CURLE_GOT_NOTHING:
-            case CURLE_PARTIAL_FILE:
-            case CURLE_SSL_CONNECT_ERROR:
-                retryable = true;
-                break;
             // A rejected scheme (e.g. an https-only policy hit on an http URL or
             // a disallowed redirect target) and a malformed URL can never
             // succeed on retry. Fail permanently so the outer loop stops
@@ -1345,7 +1356,7 @@ DownloadResult HttpClient::download_attempt(const std::string& url,
                 break;
             }
             default:
-                retryable = false;
+                retryable = is_retryable_transfer_error(static_cast<int>(res));
         }
 
         size_t current_file_size = 0;

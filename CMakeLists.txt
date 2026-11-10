@@ -3923,6 +3923,13 @@ if(BUILD_TESTING AND EXISTS "${_HTTP_CLIENT_PROXY_TEST_SRC}")
     add_cpp_ci_test(HttpClientProxyTest CI ON COMMAND test_http_client_proxy)
 endif()
 
+set(_DOWNLOAD_RESUME_TEST_SRC "${CMAKE_CURRENT_SOURCE_DIR}/test/cpp/test_download_resume.cpp")
+if(BUILD_TESTING AND EXISTS "${_DOWNLOAD_RESUME_TEST_SRC}")
+    add_executable(test_download_resume test/cpp/test_download_resume.cpp)
+    target_link_libraries(test_download_resume PRIVATE lemonade-server-core)
+    add_cpp_ci_test(DownloadResumeTest CI ON COMMAND test_download_resume)
+endif()
+
 set(_HTTP_CLIENT_TIMEOUT_TEST_SRC "${CMAKE_CURRENT_SOURCE_DIR}/test/cpp/test_http_client_timeout.cpp")
 if(BUILD_TESTING AND EXISTS "${_HTTP_CLIENT_TIMEOUT_TEST_SRC}")
     add_executable(test_http_client_timeout test/cpp/test_http_client_timeout.cpp)
