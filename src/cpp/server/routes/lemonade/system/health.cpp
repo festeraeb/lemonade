@@ -46,6 +46,7 @@ ordered_json health_schema() {
                     "properties": {
                         "model_name": {"type": "string", "description": "Name of the loaded model"},
                         "checkpoint": {"type": "string", "description": "The model's main checkpoint."},
+                        "aliases": {"type": "array", "items": {"type": "string"}, "description": "Other registered models served by this same process, because they resolve to the same checkpoints and load options. `model_name` is the model whose load started the process. Absent when the process serves one model."},
                         "last_use": {"type": "integer", "description": "Monotonic timestamp of last access (load or inference), in milliseconds"},
                         "type": {"type": "string", "description": "Model type: `llm`, `embedding`, `reranking`, `transcription`, `image`, `tts`, `audio-generation`, `classification` or `mesh`."},
                         "device": {"type": "string", "description": "Devices the model runs on, joined by `|`: `cpu`, `gpu` and `npu`, such as `gpu|npu`, or `none`."},

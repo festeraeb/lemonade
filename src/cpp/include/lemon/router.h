@@ -336,6 +336,11 @@ private:
 
     // Helper methods for multi-model management
     WrappedServer* find_server_by_model_name(const std::string& model_name) const;
+    // The live process a load can attach to as an alias; caller holds load_mutex_.
+    WrappedServer* find_shareable_server_locked(
+        const std::string& model_name, const std::string& recipe,
+        const std::map<std::string, std::string>& checkpoints,
+        const RecipeOptions& effective_options, ResidencyClass residency_class) const;
     WrappedServer* get_most_recent_server() const;
     void prune_unavailable_servers_locked();
     bool reload_model_after_watchdog_reset(const std::string& requested_model, const RecipeOptions& options, uint64_t failed_instance_id = 0);

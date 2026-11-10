@@ -1741,6 +1741,7 @@ This endpoint does not take any parameters.
 - `all_models_loaded` - Every loaded model.
   - `model_name` - Name of the loaded model
   - `checkpoint` - The model's main checkpoint.
+  - `aliases` - Other registered models served by this same process, because they resolve to the same checkpoints and load options. `model_name` is the model whose load started the process. Absent when the process serves one model.
   - `last_use` - Monotonic timestamp of last access (load or inference), in milliseconds
   - `type` - Model type: `llm`, `embedding`, `reranking`, `transcription`, `image`, `tts`, `audio-generation`, `classification` or `mesh`.
   - `device` - Devices the model runs on, joined by `|`: `cpu`, `gpu` and `npu`, such as `gpu|npu`, or `none`.

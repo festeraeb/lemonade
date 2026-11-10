@@ -146,7 +146,7 @@ void Router::set_cloud_registry(CloudProviderRegistry* registry) {
 WrappedServer* Router::find_server_by_model_name(const std::string& model_name) const {
     WrappedServer* unavailable_match = nullptr;
     for (const auto& server : loaded_servers_) {
-        if (server->get_model_name() != model_name) {
+        if (!server->serves_model(model_name)) {
             continue;
         }
         if (server->is_backend_alive()) {
@@ -157,6 +157,55 @@ WrappedServer* Router::find_server_by_model_name(const std::string& model_name) 
         }
     }
     return unavailable_match;
+}
+
+static bool is_unmetered_recipe(const std::string& recipe);
+
+namespace {
+
+// Whether a request for `requested` options asks for what `server` is running.
+// Compares resolved rather than stored sets: a request that spells out an option
+// the running process left to its default (e.g. a replayed `effective` from
+// /v1/models/{id}/options) is the same load, not an option change.
+bool same_load_options(const WrappedServer& server, const RecipeOptions& requested) {
+    json existing_opts = server.get_recipe_options().to_resolved_json();
+    json requested_opts = requested.to_resolved_json();
+    existing_opts.erase("pinned");
+    requested_opts.erase("pinned");
+    // An auto-sized process holds the number auto-tune picked, which no
+    // request can spell. Asking for auto again asks for what is running.
+    if (server.ctx_size_is_auto() &&
+        requested_opts.value("ctx_size", json(nullptr)) == -1) {
+        existing_opts.erase("ctx_size");
+        requested_opts.erase("ctx_size");
+    }
+    return existing_opts == requested_opts;
+}
+
+} // namespace
+
+WrappedServer* Router::find_shareable_server_locked(
+        const std::string& model_name, const std::string& recipe,
+        const std::map<std::string, std::string>& checkpoints,
+        const RecipeOptions& effective_options, ResidencyClass residency_class) const {
+    // Collections, cloud routes and models with no checkpoint have no process of
+    // their own to share.
+    if (checkpoints.empty() || is_model_collection_recipe(recipe) ||
+        is_unmetered_recipe(recipe)) {
+        return nullptr;
+    }
+    for (const auto& server : loaded_servers_) {
+        if (!server->is_backend_alive() || server->was_watchdog_triggered() ||
+            server->serves_model(model_name) ||
+            server->get_residency_class() != residency_class ||
+            server->get_recipe_options().get_recipe() != recipe ||
+            server->get_checkpoints() != checkpoints ||
+            !same_load_options(*server, effective_options)) {
+            continue;
+        }
+        return server.get();
+    }
+    return nullptr;
 }
 
 std::string Router::resolve_model_name(const std::string& model_name) const {
@@ -927,24 +976,16 @@ void Router::load_model(const std::string& model_name,
             existing = nullptr;
         }
         if (existing) {
-            // Compare resolved rather than stored sets: a request that spells
-            // out an option the running process left to its default (e.g. a
-            // replayed `effective` from /v1/models/{id}/options) is the same
-            // load, not an option change.
-            json existing_opts = existing->get_recipe_options().to_resolved_json();
-            json requested_opts = effective_options.to_resolved_json();
-            existing_opts.erase("pinned");
-            requested_opts.erase("pinned");
-            // An auto-sized process holds the number auto-tune picked, which no
-            // request can spell. Asking for auto again asks for what is running.
-            if (existing->ctx_size_is_auto() &&
-                requested_opts.value("ctx_size", json(nullptr)) == -1) {
-                existing_opts.erase("ctx_size");
-                requested_opts.erase("ctx_size");
-            }
-            if (allow_reload_on_option_change && existing_opts != requested_opts) {
+            const bool same_options = same_load_options(*existing, effective_options);
+            if (allow_reload_on_option_change && !same_options) {
                 LOG(INFO, "Router") << "Options changed, reloading model: " << canonical_model_name << std::endl;
-                evict_server(existing);
+                if (existing->get_model_name() != canonical_model_name) {
+                    // This name only shared a process that keeps serving the model
+                    // it started for; leave it and load this name on its own.
+                    existing->remove_model_alias(canonical_model_name);
+                } else {
+                    evict_server(existing);
+                }
                 // Fall through to create and load with new options
             } else {
                 // Residency follows the current use of the live process. Promotion
@@ -959,6 +1000,23 @@ void Router::load_model(const std::string& model_name,
                 load_cv_.notify_all();
                 return;
             }
+        }
+
+        // Attach to a process that already matches: no new slot, eviction or reload.
+        if (WrappedServer* shared = find_shareable_server_locked(
+                canonical_model_name, model_info.recipe, model_info.checkpoints,
+                effective_options, requested_residency_class)) {
+            LOG(INFO, "Router") << "Model " << canonical_model_name
+                                << " shares the loaded process of " << shared->get_model_name()
+                                << " (same checkpoints and options)" << std::endl;
+            shared->add_model_alias(canonical_model_name);
+            if (final_pinned) {
+                shared->set_pinned(true);
+            }
+            shared->update_access_time();
+            is_loading_ = false;
+            load_cv_.notify_all();
+            return;
         }
 
         // Determine model type and device
@@ -1119,6 +1177,7 @@ void Router::load_model(const std::string& model_name,
 
         // Set model metadata
         new_server->set_model_metadata(canonical_model_name, model_info.checkpoint(), model_type, device_type, effective_options);
+        new_server->set_checkpoints(model_info.checkpoints);
         new_server->set_ctx_size_auto(ctx_size_auto);
         new_server->set_residency_class(requested_residency_class);
         new_server->set_pinned(final_pinned);
@@ -1253,6 +1312,7 @@ void Router::load_model(const std::string& model_name,
             // Create new server for retry
             std::unique_ptr<WrappedServer> retry_server = create_backend_server(model_info);
             retry_server->set_model_metadata(canonical_model_name, model_info.checkpoint(), model_type, device_type, effective_options);
+            retry_server->set_checkpoints(model_info.checkpoints);
             retry_server->set_ctx_size_auto(ctx_size_auto);
             retry_server->set_residency_class(requested_residency_class);
             retry_server->set_pinned(final_pinned);
@@ -1334,6 +1394,15 @@ void Router::unload_model(const std::string& model_name) {
         WrappedServer* server = find_server_by_model_name(canonical_model_name);
         if (!server) {
             throw std::runtime_error("Model not loaded: " + model_name);
+        }
+        if (server->get_model_name() != canonical_model_name) {
+            // One of several names over a shared process: drop the name, and keep
+            // the process for the model that started it and its other names.
+            server->remove_model_alias(canonical_model_name);
+            LOG(INFO, "Router") << "Detached " << canonical_model_name
+                                << " from the process of " << server->get_model_name()
+                                << std::endl;
+            return;
         }
         evict_server(server);
     }
@@ -1427,6 +1496,14 @@ json Router::get_all_loaded_models() const {
         json model_info;
         model_info["model_name"] = model_manager_->get_public_model_name(server->get_model_name());
         model_info["checkpoint"] = server->get_checkpoint();
+        // Other registered models served by this same process; omitted when none.
+        std::vector<std::string> alias_names;
+        for (const auto& alias : server->get_model_aliases()) {
+            alias_names.push_back(model_manager_->get_public_model_name(alias));
+        }
+        if (!alias_names.empty()) {
+            model_info["aliases"] = alias_names;
+        }
         model_info["type"] = model_type_to_string(server->get_model_type());
         model_info["residency_class"] = residency_class_to_string(server->get_residency_class());
         model_info["slot_pool"] = is_unmetered_recipe(

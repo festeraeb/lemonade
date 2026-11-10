@@ -1,6 +1,9 @@
 #pragma once
 
+#include <algorithm>
+#include <map>
 #include <string>
+#include <vector>
 #include <memory>
 #include <functional>
 #include <chrono>
@@ -387,6 +390,44 @@ public:
     }
 
     std::string get_model_name() const { return model_name_; }
+
+    // Every checkpoint of the loaded model, by role (the sharing key; see below).
+    void set_checkpoints(std::map<std::string, std::string> checkpoints) {
+        std::lock_guard<std::mutex> lock(state_mutex_);
+        checkpoints_ = std::move(checkpoints);
+    }
+    std::map<std::string, std::string> get_checkpoints() const {
+        std::lock_guard<std::mutex> lock(state_mutex_);
+        return checkpoints_;
+    }
+
+    // Sharing: a second registered model with the same recipe, checkpoints and
+    // load options is attached here as an alias instead of getting its own
+    // process. get_model_name() stays the model whose load started the process.
+    void add_model_alias(const std::string& model_name) {
+        std::lock_guard<std::mutex> lock(state_mutex_);
+        if (std::find(model_aliases_.begin(), model_aliases_.end(), model_name) ==
+            model_aliases_.end()) {
+            model_aliases_.push_back(model_name);
+        }
+    }
+    bool remove_model_alias(const std::string& model_name) {
+        std::lock_guard<std::mutex> lock(state_mutex_);
+        const auto it = std::find(model_aliases_.begin(), model_aliases_.end(), model_name);
+        if (it == model_aliases_.end()) return false;
+        model_aliases_.erase(it);
+        return true;
+    }
+    std::vector<std::string> get_model_aliases() const {
+        std::lock_guard<std::mutex> lock(state_mutex_);
+        return model_aliases_;
+    }
+    bool serves_model(const std::string& model_name) const {
+        std::lock_guard<std::mutex> lock(state_mutex_);
+        return model_name_ == model_name ||
+               std::find(model_aliases_.begin(), model_aliases_.end(), model_name) !=
+                   model_aliases_.end();
+    }
     std::string get_checkpoint() const { return checkpoint_; }
     ModelType get_model_type() const { return model_type_; }
     ResidencyClass get_residency_class() const { return residency_class_; }
@@ -648,6 +689,8 @@ protected:
     // Multi-model support fields
     std::string model_name_;
     std::string checkpoint_;
+    std::map<std::string, std::string> checkpoints_;
+    std::vector<std::string> model_aliases_;
     ModelType model_type_ = ModelType::LLM;
     ResidencyClass residency_class_ = ResidencyClass::Standard;
     DeviceType device_type_ = DEVICE_NONE;
