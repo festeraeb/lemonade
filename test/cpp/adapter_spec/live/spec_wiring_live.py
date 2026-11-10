@@ -81,6 +81,14 @@ specs["fake-unreported"] = dict(
     args=["--port", "{port}"],
     identity={"owned_by": "someone-else", "unreported": True},
 )
+# No GPU placeholder, no default device: a CPU spec. {ctx} is filled from the recipe's ctx_size.
+specs["fake-cpu"] = dict(
+    base,
+    args=["--port", "{port}", "--ctx", "{ctx}"],
+    env={"LEMONADE_ENGINE_RECORD": T + "/record-cpu.json"},
+)
+del specs["fake-cpu"]["default_device_index"]
+specs["fake-hang"] = dict(base, args=["--port", "{port}"], memory_path="/hang")
 specs["fake-memory"] = dict(base, args=["--port", "{port}"], memory_path="/memory")
 for n, s in specs.items():
     json.dump(s, open(f"{T}/adapters/{n}.json", "w"), indent=1)
@@ -219,6 +227,70 @@ try:
         f"adapter_memory {mem}",
     )
     call("/api/v1/unload", {"model_name": "fake-memory"})
+    # The conformance tool's L4 passes against this engine through the router hook.
+    cp = subprocess.run(
+        [
+            sys.executable,
+            HERE + "/../../../../tools/adapter_conformance.py",
+            "--lemond",
+            f"http://127.0.0.1:{PORT}",
+            "--model",
+            "fake-memory",
+            "--json",
+        ],
+        capture_output=True,
+        text=True,
+        timeout=200,
+    )
+    try:
+        rep4 = json.loads(cp.stdout)["levels"]["L4"]
+    except Exception:
+        rep4 = {"pass": False, "detail": cp.stdout[-200:] + cp.stderr[-200:]}
+    check("conformance L4 passes", rep4["pass"], rep4["detail"])
+    call("/api/v1/unload", {"model_name": "fake-memory"})
+    # A hung engine telemetry route cannot stall /stats.
+    st, body = call("/api/v1/load", {"model_name": "fake-hang"})
+    t0 = time.time()
+    st, stats = call("/api/v1/stats", timeout=20)
+    took = time.time() - t0
+    check(
+        "a hung engine does not stall /stats",
+        st == 200 and took < 8 and "engine_telemetry" in stats,
+        f"status {st}, {took:.1f}s",
+    )
+    call("/api/v1/unload", {"model_name": "fake-hang"})
+    # {ctx} is filled, and health reports cpu for a spec that selects no GPU.
+    st, body = call("/api/v1/load", {"model_name": "fake-cpu", "ctx_size": 2048})
+    r = (
+        json.load(open(T + "/record-cpu.json"))
+        if os.path.exists(T + "/record-cpu.json")
+        else {}
+    )
+    check(
+        "{ctx} is filled with the context size lemond resolved",
+        st == 200
+        and r.get("argv", [])[-2:-1] == ["--ctx"]
+        and r.get("argv", ["x"])[-1].isdigit()
+        and int(r["argv"][-1]) > 0,
+        f"status {st}: {body[:120]}, argv {r.get('argv')}",
+    )
+    st, health = call("/api/v1/health")
+    devices = [m.get("device") for m in json.loads(health).get("all_models_loaded", [])]
+    check(
+        "health device is cpu for a spec with no GPU",
+        devices == ["cpu"],
+        f"devices {devices}",
+    )
+    call("/api/v1/unload", {"model_name": "fake-cpu"})
+    st, body = call("/api/v1/load", {"model_name": "fake-good"})
+    st, health = call("/api/v1/health")
+    devices = [m.get("device") for m in json.loads(health).get("all_models_loaded", [])]
+    check(
+        "health device stays gpu for a spec with a GPU",
+        "gpu" in (devices[0] if devices else ""),
+        f"devices {devices}",
+    )
+    call("/api/v1/unload", {"model_name": "fake-good"})
     # Cards on this host, as nvidia-smi numbers them (the R11 checks need at least one NVIDIA card).
     try:
         smi = subprocess.run(

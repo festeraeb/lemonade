@@ -4,7 +4,8 @@ started with (to $LEMONADE_ENGINE_RECORD), then serves /health, /v1/models and a
 """
 
 import json, os, sys
-from http.server import BaseHTTPRequestHandler, HTTPServer
+import time
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 port = int(sys.argv[sys.argv.index("--port") + 1])
 with open(os.environ["LEMONADE_ENGINE_RECORD"], "w") as f:
@@ -43,6 +44,9 @@ class H(BaseHTTPRequestHandler):
         self.wfile.write(b)
 
     def do_GET(self):
+        if self.path.startswith("/hang"):  # a stuck telemetry route
+            time.sleep(60)
+            return self._j({})
         if self.path.startswith("/memory"):  # R9: memory by device and tier
             return self._j(
                 {
@@ -85,4 +89,4 @@ class H(BaseHTTPRequestHandler):
         )
 
 
-HTTPServer(("127.0.0.1", port), H).serve_forever()
+ThreadingHTTPServer(("127.0.0.1", port), H).serve_forever()
