@@ -451,6 +451,10 @@ lemonade config set telemetry.otlp.semantics='["openinference"]'
 lemonade config set telemetry.otlp.headers='{"Authorization":"Bearer key"}'
 ```
 
+Every value is validated before any is applied, so one invalid value rejects the whole command and changes nothing. A value equal to its default is removed from `config.json`, which keeps only what differs from the defaults.
+
+If the server applied the values but could not write `config.json` (for example, the directory is read-only), `lemonade config set` says so on stderr and exits with status 1: the settings are active now but will be lost at the next restart. The same outcome is reported by [`POST /internal/set`](../../api/internal.md#post-internalset) as `persisted: false` with a `persist_error`.
+
 ### lemond CLI arguments (runtime overrides)
 
 `lemond` accepts `--port` and `--host` as CLI arguments to provide ephemeral runtime overrides for that specific server process without modifying `config.json`:

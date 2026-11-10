@@ -58,6 +58,7 @@ from utils.test_models import (
     USER_MODEL_TE_CHECKPOINT,
     USER_MODEL_NAME,
     get_default_cli_binary,
+    get_default_lemond_binary,
     get_hf_cache_dir_candidates,
 )
 
@@ -3136,6 +3137,114 @@ class CLIUrlSchemeTests(unittest.TestCase):
         )
 
 
+class CLIConfigSetPersistenceTests(unittest.TestCase):
+    """`lemonade config set` must reach config.json, not only the running server."""
+
+    def setUp(self):
+        import socket
+
+        lemond = get_default_lemond_binary()
+        if not (lemond and os.path.exists(lemond)):
+            lemond = shutil.which("lemond")
+        if not lemond:
+            self.skipTest("lemond binary not found (build it or add it to PATH)")
+
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            s.bind(("127.0.0.1", 0))
+            self.port = s.getsockname()[1]
+        self.cache_dir = tempfile.mkdtemp(prefix="lemonade_config_set_")
+        self.config_path = os.path.join(self.cache_dir, "config.json")
+        with open(self.config_path, "w", encoding="utf-8") as f:
+            json.dump({"config_version": 2}, f)
+        self.log = open(os.path.join(self.cache_dir, "lemond.log"), "w")
+        self.proc = subprocess.Popen(
+            [lemond, self.cache_dir, "--port", str(self.port), "--no-broadcast"],
+            stdout=self.log,
+            stderr=subprocess.STDOUT,
+        )
+        self.env = os.environ.copy()
+        self.env["LEMONADE_HOST"] = f"http://127.0.0.1:{self.port}"
+        deadline = time.time() + 60
+        while time.time() < deadline:
+            try:
+                if requests.get(f"http://127.0.0.1:{self.port}/live", timeout=2).ok:
+                    return
+            except requests.RequestException:
+                pass
+            self.assertIsNone(self.proc.poll(), "lemond exited during startup")
+            time.sleep(0.5)
+        self.fail("lemond did not become ready")
+
+    def tearDown(self):
+        os.chmod(self.cache_dir, 0o700)
+        self.proc.terminate()
+        try:
+            self.proc.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            self.proc.kill()
+            self.proc.wait(timeout=10)
+        self.log.close()
+        shutil.rmtree(self.cache_dir, ignore_errors=True)
+
+    def _file_config(self):
+        with open(self.config_path, encoding="utf-8") as f:
+            return json.load(f)
+
+    def _server_config(self):
+        response = requests.get(
+            f"http://127.0.0.1:{self.port}/internal/config",
+            headers=_auth_headers(),
+            timeout=10,
+        )
+        self.assertEqual(response.status_code, 200)
+        return response.json()
+
+    def _set(self, *pairs):
+        return run_cli_command(["config", "set", *pairs], env=self.env, timeout=30)
+
+    def test_set_persists_and_applies(self):
+        result = self._set("max_loaded_models=5", "llamacpp.backend=cpu")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+        self.assertEqual(self._server_config()["max_loaded_models"], 5)
+        saved = self._file_config()
+        self.assertEqual(saved["max_loaded_models"], 5)
+        self.assertEqual(saved["llamacpp"]["backend"], "cpu")
+
+        # A restart reads the file: the setting must still be there.
+        self.proc.terminate()
+        self.proc.wait(timeout=10)
+        self.assertEqual(self._file_config()["max_loaded_models"], 5)
+
+    def test_set_to_default_removes_the_key(self):
+        self.assertEqual(self._set("max_loaded_models=5").returncode, 0)
+        self.assertIn("max_loaded_models", self._file_config())
+        self.assertEqual(self._set("max_loaded_models=1").returncode, 0)
+        self.assertNotIn("max_loaded_models", self._file_config())
+        self.assertEqual(self._server_config()["max_loaded_models"], 1)
+
+    def test_invalid_value_changes_nothing(self):
+        before = self._file_config()
+        result = self._set("max_loaded_models=0")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("max_loaded_models", result.stdout + result.stderr)
+        self.assertEqual(self._file_config(), before)
+        self.assertEqual(self._server_config()["max_loaded_models"], 1)
+
+    def test_unsaved_setting_is_reported(self):
+        if hasattr(os, "geteuid") and os.geteuid() == 0:
+            self.skipTest("a read-only directory does not stop root")
+        if platform.system() == "Windows":
+            self.skipTest("POSIX permissions")
+        os.chmod(self.cache_dir, 0o500)
+        result = self._set("max_loaded_models=5")
+        output = result.stdout + result.stderr
+        self.assertNotEqual(result.returncode, 0, output)
+        self.assertIn("not saved to config.json", output)
+        # The running server did take the value; the CLI said it would not last.
+        self.assertEqual(self._server_config()["max_loaded_models"], 5)
+
+
 class CLIConnectionErrorMessageTests(unittest.TestCase):
     """The CLI must tell a closed connection apart from a server that is not running."""
 
@@ -3213,6 +3322,7 @@ def run_cli_client_tests():
     suite.addTests(loader.loadTestsFromTestCase(CLIHelpDocsConsistencyTests))
     suite.addTests(loader.loadTestsFromTestCase(CLIUrlSchemeTests))
     suite.addTests(loader.loadTestsFromTestCase(CLIConnectionErrorMessageTests))
+    suite.addTests(loader.loadTestsFromTestCase(CLIConfigSetPersistenceTests))
 
     runner = unittest.TextTestRunner(verbosity=2, buffer=False, failfast=True)
     result = runner.run(suite)

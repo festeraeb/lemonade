@@ -856,6 +856,7 @@
       "status": 200,
       "content_type": "application/json",
       "body": {
+        "persisted": true,
         "status": "success",
         "updated": {
           "log_level": "info"

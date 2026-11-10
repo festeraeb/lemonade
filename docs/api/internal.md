@@ -171,7 +171,7 @@ A [`POST /v1/load`](./lemonade.md#post-v1load) or inference request that needs a
 ## `POST /internal/set`
 <sub>![Status](https://img.shields.io/badge/status-fully_available-green)</sub>
 
-Changes one or more `config.json` settings without restarting `lemond`, and saves them. The `lemonade config set` command uses it.
+Changes one or more `config.json` settings without restarting `lemond`, and saves them to `config.json`, reporting in `persisted` whether the save worked. The `lemonade config set` command uses it.
 
 Requires `LEMONADE_ADMIN_API_KEY` when it is set, otherwise `LEMONADE_API_KEY` when that is set.
 
@@ -257,7 +257,7 @@ Settings with a runtime effect apply immediately, such as `port` and `host`, whi
 **Response:** `200 OK`
 
 ```json
-{"status": "success", "updated": {"log_level": "info"}}
+{"status": "success", "updated": {"log_level": "info"}, "persisted": true}
 ```
 
 ### Response format
@@ -265,6 +265,8 @@ Settings with a runtime effect apply immediately, such as `port` and `host`, whi
 - `status` - Always `success`.
 - `updated` - The keys the request set, with their new values, in `config.json`'s nested form: a flat key such as `llamacpp_backend` appears under `llamacpp`.
 - `message` - Present when a deprecated value was replaced, such as `rocm_channel=preview`.
+- `persisted` - Whether the settings were also written to `config.json`. `false` means they apply to the running server but are lost at the next restart; `persist_error` says why.
+- `persist_error` - Present when `persisted` is `false`: why `config.json` could not be written.
 
 ### Errors
 
