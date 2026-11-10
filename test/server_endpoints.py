@@ -770,6 +770,48 @@ class EndpointTests(ServerTestBase):
         )
         self.assertIsInstance(pulled.get("update_available"), bool)
 
+        # Every row names how Lemonade deploys the model, so a client can tell
+        # chat models from embedding, image or audio models without reading labels.
+        known_types = {
+            "llm",
+            "embedding",
+            "reranking",
+            "transcription",
+            "image",
+            "tts",
+            "audio-generation",
+            "classification",
+            "mesh",
+        }
+        self.assertEqual(pulled.get("type"), "llm")
+        for row in data["data"]:
+            self.assertIn(
+                row.get("type"), known_types, f"{row['id']}: {row.get('type')}"
+            )
+        everything = requests.get(
+            f"{self.base_url}/models?show_all=true", timeout=TIMEOUT_DEFAULT
+        ).json()["data"]
+        by_label = {
+            "embeddings": "embedding",
+            "image": "image",
+            "transcription": "transcription",
+            "tts": "tts",
+        }
+        for label, expected in by_label.items():
+            labelled = [
+                m
+                for m in everything
+                if label in m["labels"] and "chat" not in m["labels"]
+            ]
+            for m in labelled:
+                self.assertEqual(m["type"], expected, f"{m['id']} labels {m['labels']}")
+        self.assertEqual(
+            requests.get(
+                f"{self.base_url}/models/{ENDPOINT_TEST_MODEL}", timeout=TIMEOUT_DEFAULT
+            ).json()["type"],
+            "llm",
+        )
+
         print(f"[OK] /models returned {len(data['data'])} downloaded models")
 
     def test_004_models_list_show_all(self):

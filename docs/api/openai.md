@@ -1699,6 +1699,7 @@ With cloud providers configured, their models are listed too, with `recipe: "clo
       "created": 1234567890,
       "object": "model",
       "owned_by": "lemonade",
+      "type": "classification",
       "checkpoint": "lemonade-sdk/phishing-email-detection-distilbert-ONNX",
       "recipe": "onnxruntime",
       "size": 0.25,
@@ -1728,6 +1729,7 @@ With cloud providers configured, their models are listed too, with `recipe: "clo
   - `created` - Always `1234567890`, for OpenAI compatibility.
   - `object` - Always `"model"`.
   - `owned_by` - Always `"lemonade"`.
+  - `type` - How Lemonade deploys the model, from its labels: the same `ModelType` the router buckets loaded models by. A model whose labels name no deployment mode is `llm`.
   - `checkpoint` - The main checkpoint in the model's registry; see `registry_source`.
   - `recipe` - Recipe used to load the model, e.g. `llamacpp` or `flm`.
   - `size` - Size in GB; omitted when unknown.
@@ -1886,6 +1888,7 @@ Requires `LEMONADE_API_KEY` when it is set.
   "created": 1234567890,
   "object": "model",
   "owned_by": "lemonade",
+  "type": "llm",
   "checkpoint": "unsloth/Qwen3-0.6B-GGUF:Q4_0",
   "recipe": "llamacpp",
   "size": 0.356,
@@ -1912,6 +1915,7 @@ Requires `LEMONADE_API_KEY` when it is set.
 - `created` - Always `1234567890`, for OpenAI compatibility.
 - `object` - Always `"model"`.
 - `owned_by` - Always `"lemonade"`.
+- `type` - How Lemonade deploys the model, from its labels: the same `ModelType` the router buckets loaded models by. A model whose labels name no deployment mode is `llm`.
 - `checkpoint` - The main checkpoint in the model's registry; see `registry_source`.
 - `recipe` - Recipe used to load the model, e.g. `llamacpp` or `flm`.
 - `size` - Size in GB; omitted when unknown.

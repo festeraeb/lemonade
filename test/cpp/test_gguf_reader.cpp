@@ -177,6 +177,42 @@ int main() {
     check(!both.causal_attention && both.decision_type == "vllm-d3",
           "a later key of another prefix does not replace the architecture's key");
 
+    // The chat template comes back whole, from the exact key, without being stored in
+    // the metadata every ModelInfo carries.
+    const std::string jinja =
+        "{%- if enable_thinking is defined and not enable_thinking %}<think>\n\n</think>{%- endif %}";
+    GgufWriter templated;
+    templated.header(4);
+    templated.string_array("tokenizer.ggml.tokens", {"a", "b"});
+    templated.string("tokenizer.chat_template", jinja);
+    templated.string("general.architecture", "qwen3");
+    templated.int32("qwen3.context_length", 40960);
+    templated.write(path);
+
+    lemon::GgufMetadata with_template;
+    std::string chat_template;
+    check(lemon::read_gguf_metadata(with_template, path.string(), &chat_template),
+          "reads a header that carries a chat template");
+    check(chat_template == jinja, "the chat template is returned verbatim");
+    check(with_template.context_length == 40960, "keys after the template are still read");
+    check(lemon::chat_template_supports_thinking(chat_template),
+          "a template that reads enable_thinking supports thinking");
+
+    lemon::GgufMetadata without_out;
+    check(lemon::read_gguf_metadata(without_out, path.string()),
+          "the chat template output is optional");
+
+    GgufWriter untemplated;
+    untemplated.header(2);
+    untemplated.string("general.architecture", "llama");
+    untemplated.string("llama.rope_scaling.type", "tokenizer.chat_template");
+    untemplated.write(path);
+
+    std::string absent = "stale";
+    lemon::GgufMetadata none;
+    check(lemon::read_gguf_metadata(none, path.string(), &absent) && absent == "stale",
+          "a header without a template leaves the output untouched");
+
     std::filesystem::remove_all(dir);
     std::cout << (failures == 0 ? "PASSED: all checks passed\n" : "FAILED: some checks failed\n");
     return failures == 0 ? 0 : 1;

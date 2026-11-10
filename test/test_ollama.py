@@ -167,6 +167,15 @@ class OllamaTests(ServerTestBase):
         self.assertIn("num_ctx", data["parameters"])
         self.assertIn("llamacpp.context_length", data["model_info"])
 
+        # The template is the GGUF's own, and the thinking capability follows it.
+        self.assertIsInstance(data["template"], str)
+        reads_thinking = any(
+            marker in data["template"]
+            for marker in ("enable_thinking", "reasoning_effort", "<think>")
+        )
+        if reads_thinking:
+            self.assertIn("thinking", data["capabilities"])
+
     def test_005_show_not_found(self):
         """Test /api/show returns 404 for non-existent model."""
         response = requests.post(

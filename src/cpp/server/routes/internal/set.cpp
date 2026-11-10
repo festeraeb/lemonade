@@ -38,7 +38,7 @@ public:
         s.summary = "Change config settings at runtime";
         s.description =
             "Changes one or more `config.json` settings without restarting `lemond`, and saves "
-            "them. The `lemonade config set` command uses it.";
+            "them to `config.json`, reporting in `persisted` whether the save worked. The `lemonade config set` command uses it.";
         s.notes = {
             "Every key is validated before any is applied, so an unknown key or one invalid value "
             "rejects the whole request and changes nothing.",
@@ -78,7 +78,9 @@ public:
             "properties": {
                 "status": {"const": "success", "description": "Always `success`."},
                 "updated": {"type": "object", "description": "The keys the request set, with their new values, in `config.json`'s nested form: a flat key such as `llamacpp_backend` appears under `llamacpp`."},
-                "message": {"type": "string", "description": "Present when a deprecated value was replaced, such as `rocm_channel=preview`."}
+                "message": {"type": "string", "description": "Present when a deprecated value was replaced, such as `rocm_channel=preview`."},
+                "persisted": {"type": "boolean", "description": "Whether the settings were also written to `config.json`. `false` means they apply to the running server but are lost at the next restart; `persist_error` says why."},
+                "persist_error": {"type": "string", "description": "Present when `persisted` is `false`: why `config.json` could not be written."}
             }
         })");
         s.responses = {response};
@@ -101,8 +103,15 @@ public:
                 }
             });
 
+            // The settings are already live. Say whether they also reached
+            // config.json, so a caller is not told a setting will survive a restart
+            // when it will not.
             const std::string& config_dir = ctx_.server->config_dir();
-            if (!config_dir.empty()) {
+            bool persisted = false;
+            std::string persist_error;
+            if (config_dir.empty()) {
+                persist_error = "no config directory is set";
+            } else {
                 try {
                     json user_cfg = ConfigFile::load_raw(config_dir);
                     if (result.contains("updated") && result["updated"].is_object()) {
@@ -111,9 +120,16 @@ public:
                     json defaults = ConfigFile::get_defaults();
                     utils::JsonUtils::prune_matching(user_cfg, defaults);
                     ConfigFile::save(config_dir, user_cfg);
+                    persisted = true;
                 } catch (const std::exception& e) {
-                    LOG(WARNING, "Server") << "Failed to persist config.json: " << e.what() << std::endl;
+                    persist_error = e.what();
                 }
+            }
+            result["persisted"] = persisted;
+            if (!persisted) {
+                result["persist_error"] = persist_error;
+                LOG(WARNING, "Server") << "Failed to persist config.json: " << persist_error
+                                       << std::endl;
             }
 
             res.set_content(result.dump(), "application/json");

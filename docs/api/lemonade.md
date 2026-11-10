@@ -255,6 +255,7 @@ Requires `LEMONADE_API_KEY` when it is set.
     "created": 1234567890,
     "object": "model",
     "owned_by": "lemonade",
+    "type": "llm",
     "checkpoint": "unsloth/Phi-4-mini-instruct-GGUF:Q3_K_M",
     "recipe": "llamacpp",
     "downloaded": false,
@@ -283,6 +284,7 @@ Requires `LEMONADE_API_KEY` when it is set.
   - `created` - Always `1234567890`, for OpenAI compatibility.
   - `object` - Always `"model"`.
   - `owned_by` - Always `"lemonade"`.
+  - `type` - How Lemonade deploys the model, from its labels: the same `ModelType` the router buckets loaded models by. A model whose labels name no deployment mode is `llm`.
   - `checkpoint` - The main checkpoint in the model's registry; see `registry_source`.
   - `recipe` - Recipe used to load the model, e.g. `llamacpp` or `flm`.
   - `size` - Size in GB; omitted when unknown.
@@ -1739,6 +1741,7 @@ This endpoint does not take any parameters.
 - `all_models_loaded` - Every loaded model.
   - `model_name` - Name of the loaded model
   - `checkpoint` - The model's main checkpoint.
+  - `aliases` - Other registered models served by this same process, because they resolve to the same checkpoints and load options. `model_name` is the model whose load started the process. Absent when the process serves one model.
   - `last_use` - Monotonic timestamp of last access (load or inference), in milliseconds
   - `type` - Model type: `llm`, `embedding`, `reranking`, `transcription`, `image`, `tts`, `audio-generation`, `classification` or `mesh`.
   - `device` - Devices the model runs on, joined by `|`: `cpu`, `gpu` and `npu`, such as `gpu|npu`, or `none`.

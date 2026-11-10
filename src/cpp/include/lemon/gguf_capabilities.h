@@ -70,6 +70,18 @@ inline void inspect_gguf_string(const std::string& key, const std::string& value
     }
 }
 
+/// True when a chat template reads a thinking control: the `enable_thinking`
+/// and `reasoning_effort` template variables, or the `<think>` tags a reasoning
+/// model's template opens or closes. This is read from the template itself, so a
+/// model that thinks is reported as one without anyone having to label it.
+inline bool chat_template_supports_thinking(const std::string& chat_template) {
+    using namespace gguf_capabilities_detail;
+    return contains(chat_template, "enable_thinking") ||
+           contains(chat_template, "reasoning_effort") ||
+           contains(chat_template, "<think>") ||
+           contains(chat_template, "</think>");
+}
+
 inline bool apply_gguf_capability_labels(std::vector<std::string>& labels, const GgufCapabilities& caps) {
     bool changed = false;
     if (caps.vision) changed = add_label_once(labels, "vision") || changed;

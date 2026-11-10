@@ -20,6 +20,28 @@ Models are categorized into these types:
 
 Each type has its own independent LRU cache, all sharing the same slot limit set by `max_loaded_models`.
 
+## Models That Share One Process
+
+Registered models can point at the same checkpoint, for example a stock model and
+a custom `user.` model with a different name. When a model is loaded while another
+registered model with the **same recipe, the same checkpoints (every role, such as
+`main` and `mmproj`), the same load options and the same residency class** is
+already running, Lemonade does not start a second backend. The new name is attached
+to the running process:
+
+- Loading the second name does not evict, reload or restart anything, and it does
+  not take a slot, so it counts against `max_loaded_models` only once.
+- Requests to either name are served by the one process.
+- `GET /api/v1/health` lists the process once, under the name of the model whose
+  load started it (`model_name`), with the other names in `aliases`.
+- Unloading an attached name drops only that name. Unloading the model that started
+  the process, or evicting it, unloads the process and every name attached to it.
+- Pinning an attached name pins the process.
+- If the options differ, even by `ctx_size`, the second name is loaded as its own
+  process as before. Load options belong to the process, so two names cannot run
+  with different options over one process; per-request sampling is set by the
+  client.
+
 ## Router and Classifier Dependencies
 
 Models loaded internally to choose a candidate use a separate **routing-helper**

@@ -4141,6 +4141,15 @@ if(BUILD_TESTING AND EXISTS "${_ROUTING_HELPER_RECONCILE_TEST_SRC}")
                     COMMAND test_routing_helper_reconcile)
 endif()
 
+# Registered models over the same checkpoints and options share one backend
+# process: the sharing predicate and the name lookup, with stub servers.
+set(_MODEL_PROCESS_SHARING_TEST_SRC "${CMAKE_CURRENT_SOURCE_DIR}/test/cpp/test_model_process_sharing.cpp")
+if(BUILD_TESTING AND EXISTS "${_MODEL_PROCESS_SHARING_TEST_SRC}")
+    add_executable(test_model_process_sharing test/cpp/test_model_process_sharing.cpp)
+    target_link_libraries(test_model_process_sharing PRIVATE lemonade-server-core)
+    add_cpp_ci_test(ModelProcessSharingTest CI ON COMMAND test_model_process_sharing)
+endif()
+
 # Launch command bookkeeping: the command recorded at spawn must keep describing
 # the process currently held, so a restart replaces it and cleanup erases it.
 set(_LAUNCH_COMMAND_TEST_SRC "${CMAKE_CURRENT_SOURCE_DIR}/test/cpp/test_launch_command.cpp")

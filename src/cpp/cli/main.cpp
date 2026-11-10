@@ -1414,6 +1414,17 @@ static int handle_config_set(lemonade::LemonadeClient& client,
         } else {
             std::cout << result.dump(4) << std::endl;
         }
+        // The server applied the values; a failed save means they vanish at its next
+        // restart, which a zero exit status must not hide.
+        if (result.value("persisted", true) == false) {
+            std::cerr << "Warning: the settings are active now but were not saved to config.json, "
+                         "so they will be lost when the server restarts";
+            if (result.contains("persist_error") && result["persist_error"].is_string()) {
+                std::cerr << " (" << result["persist_error"].get<std::string>() << ")";
+            }
+            std::cerr << "." << std::endl;
+            return 1;
+        }
         return 0;
     } catch (const lemonade::HttpError& e) {
         if (e.status_code() == 400) {
