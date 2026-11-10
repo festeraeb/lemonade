@@ -3,6 +3,7 @@
 #include <vector>
 
 #include "lemon/model_manager.h"
+#include "lemon/model_types.h"
 #include "lemon/models/registry_types.h"
 #include "lemon/router.h"
 
@@ -65,6 +66,7 @@ json ModelJson::to_json(const std::string& model_id, const ModelInfo& info, int 
         {"object", "model"},
         {"created", 1234567890},
         {"owned_by", "lemonade"},
+        {"type", model_type_to_string(get_model_type_from_labels(info.labels))},
         {"checkpoint", info.checkpoint()},
         {"checkpoints", info.checkpoints},
         {"recipe", info.recipe},
@@ -192,7 +194,7 @@ json ModelJson::status_page_json(const std::string& model_id, const ModelInfo& i
 nlohmann::ordered_json ModelJson::schema() {
     return nlohmann::ordered_json::parse(R"json({
         "type": "object",
-        "required": ["id", "object", "created", "owned_by", "checkpoint", "checkpoints", "recipe",
+        "required": ["id", "object", "created", "owned_by", "type", "checkpoint", "checkpoints", "recipe",
                      "downloaded", "update_available", "suggested", "source", "registry_source",
                      "labels", "components", "recipe_options"],
         "properties": {
@@ -200,6 +202,7 @@ nlohmann::ordered_json ModelJson::schema() {
             "created": {"type": "integer", "description": "Always `1234567890`, for OpenAI compatibility."},
             "object": {"const": "model", "description": "Always `\"model\"`."},
             "owned_by": {"const": "lemonade", "description": "Always `\"lemonade\"`."},
+            "type": {"enum": ["llm", "embedding", "reranking", "transcription", "image", "tts", "audio-generation", "classification", "mesh"], "description": "How Lemonade deploys the model, from its labels: the same `ModelType` the router buckets loaded models by. A model whose labels name no deployment mode is `llm`."},
             "checkpoint": {"type": "string", "description": "The main checkpoint in the model's registry; see `registry_source`."},
             "recipe": {"type": "string", "description": "Recipe used to load the model, e.g. `llamacpp` or `flm`."},
             "size": {"type": "number", "description": "Size in GB; omitted when unknown."},

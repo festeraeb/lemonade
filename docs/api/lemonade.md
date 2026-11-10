@@ -255,6 +255,7 @@ Requires `LEMONADE_API_KEY` when it is set.
     "created": 1234567890,
     "object": "model",
     "owned_by": "lemonade",
+    "type": "llm",
     "checkpoint": "unsloth/Phi-4-mini-instruct-GGUF:Q3_K_M",
     "recipe": "llamacpp",
     "downloaded": false,
@@ -283,6 +284,7 @@ Requires `LEMONADE_API_KEY` when it is set.
   - `created` - Always `1234567890`, for OpenAI compatibility.
   - `object` - Always `"model"`.
   - `owned_by` - Always `"lemonade"`.
+  - `type` - How Lemonade deploys the model, from its labels: the same `ModelType` the router buckets loaded models by. A model whose labels name no deployment mode is `llm`.
   - `checkpoint` - The main checkpoint in the model's registry; see `registry_source`.
   - `recipe` - Recipe used to load the model, e.g. `llamacpp` or `flm`.
   - `size` - Size in GB; omitted when unknown.
