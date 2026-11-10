@@ -189,7 +189,12 @@ inline bool has_gguf_magic(const std::string& path) {
 ///
 /// Returns true on success (out is populated).  Returns false if the file
 /// cannot be opened or does not have a valid GGUF header.
-inline bool read_gguf_metadata(GgufMetadata& out, const std::string& path) {
+// When chat_template is given it receives the model's `tokenizer.chat_template`
+// string, left empty when the file carries none. The template is not part of
+// GgufMetadata: it runs to tens of kilobytes and every ModelInfo copy would
+// carry it.
+inline bool read_gguf_metadata(GgufMetadata& out, const std::string& path,
+                               std::string* chat_template = nullptr) {
     std::ifstream in(lemon::utils::path_from_utf8(path), std::ios::binary);
     if (!in) return false;
 
@@ -381,6 +386,9 @@ inline bool read_gguf_metadata(GgufMetadata& out, const std::string& path) {
                 std::string value;
                 if (read_gguf_string(in, value)) {
                     inspect_gguf_string(key, value, out.caps);
+                    if (chat_template != nullptr && key == "tokenizer.chat_template") {
+                        *chat_template = std::move(value);
+                    }
                 }
             } else if (!skip_gguf_string(in)) {
                 return false;

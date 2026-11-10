@@ -20,6 +20,7 @@
 using lemon::GgufCapabilities;
 using lemon::add_label_once;
 using lemon::apply_gguf_capability_labels;
+using lemon::chat_template_supports_thinking;
 using lemon::inspect_gguf_string;
 
 static int g_failures = 0;
@@ -137,6 +138,17 @@ int main() {
         inspect_gguf_string("some.random.key", "this is a vision image model", caps);
         check("inspect_gguf_string ignores non-stable vision key", !caps.vision);
     }
+
+    // --- chat_template_supports_thinking ---------------------------------------
+    check("enable_thinking variable means thinking",
+          chat_template_supports_thinking("{% if enable_thinking is defined %}x{% endif %}"));
+    check("reasoning_effort variable means thinking",
+          chat_template_supports_thinking("{{ reasoning_effort | default('medium') }}"));
+    check("<think> tags mean thinking",
+          chat_template_supports_thinking("<|im_start|>assistant\n<think>\n"));
+    check("a plain chat template does not mean thinking",
+          !chat_template_supports_thinking("<|im_start|>user\n{{ message }}<|im_end|>"));
+    check("an empty template does not mean thinking", !chat_template_supports_thinking(""));
 
     if (g_failures == 0) {
         std::printf("\nAll gguf_capabilities tests passed\n");
