@@ -9,7 +9,7 @@
       "anchor": "^struct BackendDescriptor\\b",
       "kind": "block",
       "used_for": "adapter.h fills BackendDescriptor field by field, in order",
-      "fingerprint": "2eea8de349d7cd30"
+      "fingerprint": "4c6c03914616fa36"
     },
     {
       "id": "slot-policy",
