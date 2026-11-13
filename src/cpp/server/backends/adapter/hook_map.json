@@ -299,6 +299,38 @@
       "kind": "decl",
       "used_for": "the declared ctx travels as extras[\"adapter_ctx\"]",
       "fingerprint": "5a093a53bc917d68"
+    },
+    {
+      "id": "wrapped-can-shrink",
+      "file": "src/cpp/include/lemon/wrapped_server.h",
+      "anchor": "^\\s*virtual bool can_shrink\\(",
+      "kind": "decl",
+      "used_for": "AdapterServer::can_shrink: true when the spec names a budget_path and runs on a GPU",
+      "fingerprint": "04c29f6dc884b8cd"
+    },
+    {
+      "id": "wrapped-shrink",
+      "file": "src/cpp/include/lemon/wrapped_server.h",
+      "anchor": "^\\s*virtual bool shrink_for_pressure\\(",
+      "kind": "decl",
+      "used_for": "AdapterServer::shrink_for_pressure POSTs budget_path before a pressure eviction",
+      "fingerprint": "6d4234f0df5280a3"
+    },
+    {
+      "id": "http-get",
+      "file": "src/cpp/include/lemon/utils/http_client.h",
+      "anchor": "^\\s*static HttpResponse get\\(",
+      "kind": "decl",
+      "used_for": "memory report and health probe with a real timeout (forward_get_request ignores its timeout)",
+      "fingerprint": "3d4a8c2b73497dc1"
+    },
+    {
+      "id": "http-post",
+      "file": "src/cpp/include/lemon/utils/http_client.h",
+      "anchor": "^\\s*static HttpResponse post\\(",
+      "kind": "decl",
+      "used_for": "the budget request, with a 5 s timeout",
+      "fingerprint": "5fd1380ef8fcbd86"
     }
   ]
 }

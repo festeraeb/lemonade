@@ -157,6 +157,7 @@ void AdapterServer::load(const std::string& model_name, const ModelInfo& model_i
     completion_ = spec.value("completion", true);
     telemetry_path_ = spec.value("telemetry_path", std::string{});
     memory_path_ = spec.value("memory_path", std::string{});
+    budget_path_ = spec.value("budget_path", std::string{});
 
     std::string device;
     const std::string requested = option_text(options, "adapter_device");
@@ -174,6 +175,7 @@ void AdapterServer::load(const std::string& model_name, const ModelInfo& model_i
         const auto values = adapter::specs::device_values(requested, spec_default, inventory);
         device = values.device;
         gpu_uuids = values.gpu_uuids;
+        device_uuid_ = gpu_uuids;
     } catch (const adapter::specs::SpecError& e) {
         throw std::runtime_error("adapter " + name + ": " + std::string(e.what()));
     }
@@ -333,18 +335,19 @@ std::vector<int> process_tree(int root) {
     return out;
 }
 
+std::string run(const char* cmd) {
+    std::string text;
+    if (FILE* p = popen(cmd, "r")) {
+        char buf[512];
+        while (fgets(buf, sizeof(buf), p)) text += buf;
+        pclose(p);
+    }
+    return text;
+}
+
 // pid -> MiB for every process holding GPU memory, from nvidia-smi and rocm-smi when they are installed.
 std::map<int, long> gpu_holders() {
     std::map<int, long> out;
-    const auto run = [](const char* cmd) {
-        std::string text;
-        if (FILE* p = popen(cmd, "r")) {
-            char buf[512];
-            while (fgets(buf, sizeof(buf), p)) text += buf;
-            pclose(p);
-        }
-        return text;
-    };
     std::istringstream nv(run("nvidia-smi --query-compute-apps=pid,used_memory --format=csv,noheader,nounits 2>/dev/null"));
     for (std::string line; std::getline(nv, line);) {
         int pid = 0;
@@ -358,9 +361,113 @@ std::map<int, long> gpu_holders() {
     }
     return out;
 }
+
+// MiB that the processes in `tree` hold on the NVIDIA card with this uuid; -1 when nvidia-smi says nothing.
+long tree_mib_on(const std::vector<int>& tree, const std::string& uuid) {
+    const std::string text =
+        run("nvidia-smi --query-compute-apps=pid,gpu_uuid,used_memory --format=csv,noheader,nounits 2>/dev/null");
+    if (text.empty()) return -1;
+    long total = 0;
+    std::istringstream in(text);
+    for (std::string line; std::getline(in, line);) {
+        int pid = 0;
+        char id[128] = {};
+        long mib = 0;
+        if (std::sscanf(line.c_str(), "%d, %127[^,], %ld", &pid, id, &mib) == 3 && id == uuid &&
+            std::find(tree.begin(), tree.end(), pid) != tree.end()) {
+            total += mib;
+        }
+    }
+    return total;
+}
+
+// Size in bytes of the NVIDIA card with this uuid; 0 when unknown.
+uint64_t device_total_bytes(const std::string& uuid) {
+    std::istringstream in(run("nvidia-smi --query-gpu=uuid,memory.total --format=csv,noheader,nounits 2>/dev/null"));
+    for (std::string line; std::getline(in, line);) {
+        char id[128] = {};
+        unsigned long long mib = 0;
+        if (std::sscanf(line.c_str(), "%127[^,], %llu", id, &mib) == 2 && id == uuid) return mib * 1024 * 1024;
+    }
+    return 0;
+}
 #endif
 
+constexpr long kBudgetTimeoutSeconds = 5;
+
+json get_json(const std::string& url) {
+    const auto r = utils::HttpClient::get(url, {}, kBudgetTimeoutSeconds, utils::HttpSecurityPolicy::TrustedLoopback);
+    if (r.status_code != 200) throw std::runtime_error("HTTP " + std::to_string(r.status_code) + " from " + url);
+    return json::parse(r.body);
+}
+
 }  // namespace
+
+bool AdapterServer::can_shrink() const {
+    return !budget_path_.empty() && !device_uuid_.empty() && (device_type_ & DEVICE_GPU);
+}
+
+// R10: ask the engine to fit a smaller budget on its card instead of being unloaded. Any failure, timeout or
+// short answer returns false and eviction goes on as without this hook.
+bool AdapterServer::shrink_for_pressure(double used, double target) {
+    constexpr uint64_t kMiB = 1024 * 1024;
+    const std::string base = get_base_url();
+    try {
+        uint64_t engine_bytes = 0;
+        if (!memory_path_.empty()) {
+            engine_bytes = adapter::specs::device_bytes(
+                adapter::specs::parse_memory_report(get_json(base + memory_path_)), device_uuid_);
+        }
+        uint64_t total = 0;
+#ifdef __linux__
+        const std::vector<int> tree = process_tree(get_process_id());
+        const long gpu_before = tree_mib_on(tree, device_uuid_);
+        if (engine_bytes == 0 && gpu_before > 0) engine_bytes = static_cast<uint64_t>(gpu_before) * kMiB;
+        total = device_total_bytes(device_uuid_);
+#endif
+        const int64_t mib = adapter::specs::budget_target_mib(engine_bytes, total, used, target);
+        if (mib < 0) {
+            LOG(INFO, "Adapter") << spec_name_ << ": no budget to ask for (" << engine_bytes / kMiB << " MiB on "
+                                 << device_uuid_ << "); unloading" << std::endl;
+            return false;
+        }
+        const auto r = utils::HttpClient::post(base + budget_path_,
+                                               adapter::specs::budget_request(device_uuid_, mib).dump(),
+                                               {{"Content-Type", "application/json"}}, kBudgetTimeoutSeconds,
+                                               utils::HttpSecurityPolicy::TrustedLoopback);
+        if (r.status_code != 200) throw std::runtime_error("HTTP " + std::to_string(r.status_code));
+        const auto reply = adapter::specs::parse_budget_reply(json::parse(r.body));
+        // The engine's word is checked against what lemond can measure: its memory report read again, and
+        // nvidia-smi for the engine's processes on that card when the card held them before.
+        int64_t measured = -1;
+        std::string how = "not measured";
+        if (reply.accepted && !memory_path_.empty()) {
+            measured = static_cast<int64_t>(adapter::specs::device_bytes(
+                adapter::specs::parse_memory_report(get_json(base + memory_path_)), device_uuid_));
+            how = "engine memory report";
+        }
+#ifdef __linux__
+        if (reply.accepted && gpu_before > 0) {
+            const long gpu_after = tree_mib_on(tree, device_uuid_);
+            if (gpu_after >= 0) {
+                measured = std::max<int64_t>(measured, static_cast<int64_t>(gpu_after) * kMiB);
+                how += ", checked on the GPU";
+            }
+        }
+#endif
+        const bool met = adapter::specs::budget_met(reply, mib, measured);
+        LOG(INFO, "Adapter") << spec_name_ << ": budget " << mib << " MiB on " << device_uuid_ << " "
+                             << (met ? "met" : "not met") << " (accepted=" << (reply.accepted ? "yes" : "no")
+                             << ", engine says " << reply.now_bytes / kMiB << " MiB, measured "
+                             << (measured < 0 ? std::string("-") : std::to_string(measured / kMiB) + " MiB") << ", "
+                             << how << (reply.reason.empty() ? "" : ", reason: " + reply.reason) << ")"
+                             << (met ? "" : "; unloading") << std::endl;
+        return met;
+    } catch (const std::exception& e) {
+        LOG(WARNING, "Adapter") << spec_name_ << ": budget request failed (" << e.what() << "); unloading" << std::endl;
+        return false;
+    }
+}
 
 void AdapterServer::unload() {
 #ifdef __linux__

@@ -10,6 +10,7 @@ It was built against Lemonade 2026.45 and 2026.46 and rebased onto `main`. It is
 - [Device selection](#device-selection)
 - [Readiness](#readiness)
 - [Models declared by the spec](#models-declared-by-the-spec)
+- [Budget request before eviction](#budget-request-before-eviction)
 - [Conformance levels](#conformance-levels)
 - [Running the checks](#running-the-checks)
 - [What the plane needs from lemond](#what-the-plane-needs-from-lemond)
@@ -59,7 +60,7 @@ A spec is `<name>.json` in `<config dir>/adapters/` (or `$LEMONADE_ADAPTERS_DIR`
 | `default_device_index` | Card used when the model sets no `adapter_device`. |
 | `ready` | Readiness probe, see [Readiness](#readiness). |
 | `identity.owned_by` | When set, `/v1/models` must report this owner or the engine is stopped. |
-| `telemetry_path`, `memory_path`, `budget_path` | Engine routes for statistics, the memory report and the budget request. |
+| `telemetry_path`, `memory_path`, `budget_path` | Engine routes for statistics, the memory report and the [budget request](#budget-request-before-eviction). |
 | `models` | Models the spec offers without a registration, see [Models declared by the spec](#models-declared-by-the-spec). |
 | `telemetry` | `{enabled, env, what}`: extra environment applied only when `enabled` is true or the user sets `adapter_telemetry=on`. Off by default. |
 
@@ -125,6 +126,24 @@ A spec may list the models it serves. lemond offers them at startup with recipe 
 
 The models come from a catalog source, `backend_declared`, listed after registrations. It asks each backend's `BackendOps::declared_models()`; only the adapter answers.
 
+## Budget request before eviction
+
+When VRAM pressure would unload an adapter model, lemond first asks the engine to shrink. A spec opts in with `budget_path`; `memory_path` lets lemond see the result.
+
+```json
+"memory_path": "/memory",
+"budget_path": "/budget"
+```
+
+lemond POSTs `{"device": "<uuid>", "mib": N}` and expects `{"accepted": true, "now_bytes": B}` or `{"accepted": false, "reason": "..."}`.
+
+- N is chosen so the card falls from the measured usage to `auto_evict_threshold_pct`. With the card's size known (from `nvidia-smi`), the engine gives up that share of the card. Without it, the engine's own bytes are scaled by threshold / usage.
+- The model stays loaded only when the engine accepts, `now_bytes` fits N, and what lemond measures afterwards fits N too: the memory report read again, and `nvidia-smi` for the engine's processes on that card when they held memory there before.
+- Any other outcome unloads the model exactly as before: a refusal, a short answer, an answer that is not JSON, or no answer within 5 seconds.
+- Only pressure eviction asks. An idle-timeout eviction, a slot eviction (`max_models`) and a spec without `budget_path` or on the CPU unload as before.
+
+In lemond this is `WrappedServer::can_shrink()` and `shrink_for_pressure(used, target)`, both "cannot" by default, called from `EvictionEngine::evaluate_servers()` with no router lock held. `WrappedServer::try_begin_maintenance()` keeps the model alive during the call, the way a downsize does.
+
 ## Conformance levels
 
 `tools/adapter_conformance.py` grades one adapter against a running lemond and reports the highest level it earns. Failing a level is a downgrade, not a removal: level 0 needs no test because the engine can always be run without control, for example as a provider.
@@ -146,7 +165,7 @@ L4 cannot pass on a stock `lemond` today, for the reason in the next section.
 All commands run from the repository root. `BUILD_DIR` names a configured build; the unit tests take the `nlohmann/json` header from its `_deps` folder (or set `JSON_INCLUDE`).
 
 ```bash
-# Unit tests for the pure spec module, one job at a time (ap2 ap3 ap4 ap5 ap6 ap7 ap8 ap10 ap11 ap12 ap13)
+# Unit tests for the pure spec module, one job at a time (ap2 ap3 ap4 ap5 ap6 ap7 ap8 ap10 ap11 ap12 ap13 ap14)
 BUILD_DIR=build bash test/cpp/adapter_spec/run.sh ap2
 
 # Conformance tool unit tests
@@ -158,6 +177,7 @@ ADAPTER_LIVE_PORT=14300 python3 test/cpp/adapter_spec/live/spec_wiring_live.py b
 
 # Live tests for the optional hooks, each with its own throwaway tree and the fixture engine
 python3 test/cpp/adapter_spec/live/declared_models_live.py build/lemond
+python3 test/cpp/adapter_spec/live/budget_live.py build/lemond
 
 # Do the Lemonade declarations the backend depends on still match?
 python3 tools/adapter_hook_map.py --check
@@ -186,7 +206,7 @@ R1 to R17 are the requests we drew up while building the plane. The plane works 
 | R7 | Per-level conformance with downgrade | Keep the control the adapter earned | `adapter_conformance.py` reports the level; lemond does not act on it at runtime | Tool in the plane; runtime use needs lemond |
 | R8 | Unload verified against the device | One wrong adapter must not break eviction | `unload()` checks `nvidia-smi` / `rocm-smi` for the engine's process tree and kills a leftover holder; the tool checks the device too | In the plane (Linux) |
 | R9 | Memory report per device and tier | MoE engines span VRAM, host RAM, remote memory | `adapter_memory` is built by `memory_telemetry()`; `Router::collect_engine_telemetry()` calls `get_additional_telemetry()` on each loaded engine and `/api/v1/stats` returns it under `engine_telemetry.<model>` | In `cesarops/adapter-hooks` |
-| R10 | Budget verb: shrink to N MiB on device X | Serve slower instead of evicting | Request builder and reply parser tested; no caller, no endpoint | The telemetry hook is in `cesarops/adapter-hooks`; the verb in the eviction path is not built |
+| R10 | Budget verb: shrink to N MiB on device X | Serve slower instead of evicting | Pressure eviction asks `budget_path` first and keeps the model only when the answer and a fresh measurement fit | Optional hook: `can_shrink()` / `shrink_for_pressure()` on `WrappedServer`, called from the eviction engine |
 | R11 | Device by UUID | Index order changes | Index or UUID accepted; both placeholders filled | In the plane |
 | R12 | Metrics passthrough under the engine id | Operators see engine metrics | `telemetry_path` is read; not proxied as a route | Not built |
 | R13 | Engine may own helper processes, including remote | Some engines span hosts | Engine is one process to lemond | Not built; invisible to lemond |

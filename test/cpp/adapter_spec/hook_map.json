@@ -432,6 +432,46 @@
    "status": "new",
    "matches_old": 0,
    "matches_new": 1
+  },
+  {
+   "file": "src/cpp/include/lemon/wrapped_server.h",
+   "symbol": "WrappedServer::can_shrink",
+   "pattern": "^\\s*virtual bool can_shrink\\(",
+   "signature": "virtual bool can_shrink() const {",
+   "role": "AdapterServer::can_shrink: true when the spec names a budget_path and runs on a GPU",
+   "status": "new",
+   "matches_old": 0,
+   "matches_new": 1
+  },
+  {
+   "file": "src/cpp/include/lemon/wrapped_server.h",
+   "symbol": "WrappedServer::shrink_for_pressure",
+   "pattern": "^\\s*virtual bool shrink_for_pressure\\(",
+   "signature": "virtual bool shrink_for_pressure(double used, double target) {",
+   "role": "AdapterServer::shrink_for_pressure POSTs budget_path before a pressure eviction",
+   "status": "new",
+   "matches_old": 0,
+   "matches_new": 1
+  },
+  {
+   "file": "src/cpp/include/lemon/utils/http_client.h",
+   "symbol": "HttpClient::get",
+   "pattern": "^\\s*static HttpResponse get\\(",
+   "signature": "static HttpResponse get(const std::string& url, const std::map<std::string, std::string>& headers = {",
+   "role": "memory report and health probe with a real timeout (forward_get_request ignores its timeout)",
+   "status": "new",
+   "matches_old": 0,
+   "matches_new": 1
+  },
+  {
+   "file": "src/cpp/include/lemon/utils/http_client.h",
+   "symbol": "HttpClient::post",
+   "pattern": "^\\s*static HttpResponse post\\(",
+   "signature": "static HttpResponse post( const std::string& url, const std::string& body, const std::map<std::string, std::string>& headers = {",
+   "role": "the budget request, with a 5 s timeout",
+   "status": "new",
+   "matches_old": 0,
+   "matches_new": 1
   }
  ]
 }

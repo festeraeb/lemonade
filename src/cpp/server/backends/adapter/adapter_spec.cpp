@@ -494,6 +494,26 @@ BudgetResult parse_budget_reply(const json& body) {
     return BudgetResult{accepted, 0, body.value("reason", "")};
 }
 
+int64_t budget_target_mib(uint64_t engine_bytes, uint64_t device_total, double used, double target) {
+    constexpr double kMiB = 1024.0 * 1024.0;
+    if (!(used > 0.0 && used <= 1.0 && target > 0.0 && target < used) || engine_bytes == 0) return -1;
+    double keep;
+    if (device_total > 0) {
+        keep = static_cast<double>(engine_bytes) - (used - target) * static_cast<double>(device_total);
+    } else {
+        keep = static_cast<double>(engine_bytes) * target / used;
+    }
+    const auto mib = static_cast<int64_t>(keep / kMiB);
+    return mib > 0 ? mib : -1;
+}
+
+bool budget_met(const BudgetResult& reply, int64_t target_mib, int64_t measured_bytes) {
+    if (!reply.accepted || target_mib <= 0) return false;
+    const uint64_t limit = static_cast<uint64_t>(target_mib) * 1024 * 1024;
+    if (reply.now_bytes > limit) return false;
+    return measured_bytes < 0 || static_cast<uint64_t>(measured_bytes) <= limit;
+}
+
 Readiness ready_state(const json& status, const json& ready_spec) {
     Readiness result{ReadyState::Starting, -1};
 

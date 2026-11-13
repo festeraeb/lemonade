@@ -35,10 +35,18 @@ public:
     std::map<std::string, nlohmann::json> get_additional_telemetry() override;
     std::string get_additional_telemetry_url() const override;
 
+    // POSTs the spec's budget_path ({"device", "mib"}) and keeps the model only when the engine's answer and
+    // what lemond can measure afterwards both fit the budget. Specs without budget_path, or on the CPU, are
+    // never asked.
+    bool can_shrink() const override;
+    bool shrink_for_pressure(double used, double target) override;
+
 private:
     std::string spec_name_;
     std::string telemetry_path_;
     std::string memory_path_;
+    std::string budget_path_;
+    std::string device_uuid_;
     bool completion_ = true;
 };
 

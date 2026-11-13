@@ -323,7 +323,7 @@ public:
     // router lock with only a raw pointer to it.
     bool try_begin_downsize() {
         std::lock_guard<std::mutex> lock(state_mutex_);
-        if (state_ == ModelState::READY && active_request_count_ == 0) {
+        if (state_ == ModelState::READY && active_request_count_ == 0 && !maintenance_in_progress_) {
             state_ = ModelState::DOWNSIZING;
             maintenance_in_progress_ = true;
             state_cv_.notify_all();
@@ -345,6 +345,32 @@ public:
             if (state_ == ModelState::DOWNSIZING) {
                 state_ = success ? ModelState::DOWNSIZED : ModelState::READY;
             }
+            state_cv_.notify_all();
+            on_idle = take_pending_reclaim_if_idle_locked();
+        }
+        if (on_idle) {
+            on_idle();
+        }
+    }
+
+    // Keeps an idle READY or DOWNSIZED model alive, with its state unchanged, while the eviction engine
+    // asks it to shrink outside the router lock. Requests and unloads wait as they do on a downsize.
+    // A true result must be matched by end_maintenance().
+    bool try_begin_maintenance() {
+        std::lock_guard<std::mutex> lock(state_mutex_);
+        if (maintenance_in_progress_ || active_request_count_ != 0 ||
+            (state_ != ModelState::READY && state_ != ModelState::DOWNSIZED)) {
+            return false;
+        }
+        maintenance_in_progress_ = true;
+        return true;
+    }
+
+    void end_maintenance() {
+        std::function<void()> on_idle;
+        {
+            std::lock_guard<std::mutex> lock(state_mutex_);
+            maintenance_in_progress_ = false;
             state_cv_.notify_all();
             on_idle = take_pending_reclaim_if_idle_locked();
         }
@@ -483,6 +509,18 @@ public:
     // Restore the model from a downsized state
     virtual void restore() {
         // No-op by default
+    }
+
+    // Asked before the eviction engine unloads this model for VRAM pressure (never for an idle timeout):
+    // free device memory so usage falls from `used` to `target` (fractions), and return true only when
+    // that was done; the model then stays loaded. Called without the router lock, under
+    // try_begin_maintenance(); keep it short. Backends that cannot shrink leave can_shrink() false and
+    // are never asked.
+    virtual bool can_shrink() const { return false; }
+    virtual bool shrink_for_pressure(double used, double target) {
+        (void)used;
+        (void)target;
+        return false;
     }
 
     // Default to an "unsupported" error so non-chat backends (TTS, image,

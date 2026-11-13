@@ -166,6 +166,19 @@ struct BudgetResult {
 // "accepted" is missing or not a bool, or an accepted reply has no valid now_bytes.
 BudgetResult parse_budget_reply(const json& body);
 
+// The MiB to ask an engine to shrink to on its device so that the device falls from `used` to `target`
+// (fractions of the device's memory). `engine_bytes` is what the engine holds on that device now and
+// `device_total` the device's size, 0 when unknown. With the size known the engine gives up
+// (used - target) * device_total bytes. Without it the engine's own bytes are scaled by target / used,
+// which is exact when the engine is the device's only user. Returns -1 when there is nothing to ask:
+// used <= target, a fraction outside (0, 1], engine_bytes == 0, or the engine would have to give up
+// everything (that is an unload).
+int64_t budget_target_mib(uint64_t engine_bytes, uint64_t device_total, double used, double target);
+
+// True when a budget answer may replace an unload: accepted, now_bytes at most target_mib MiB, and,
+// when lemond measured the engine again afterwards (measured_bytes >= 0), that measurement too.
+bool budget_met(const BudgetResult& reply, int64_t target_mib, int64_t measured_bytes);
+
 // ---- ready states (R5) ----
 
 enum class ReadyState { Starting, Loading, Ready, Warm, Error };

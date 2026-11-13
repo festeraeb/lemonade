@@ -59,6 +59,8 @@ void EvictionEngine::evaluation_loop() {
 void EvictionEngine::evaluate_servers(double current_vram_pct) {
     std::string model_to_evict;
     std::vector<std::string> models_to_downsize;
+    WrappedServer* shrink_candidate = nullptr;  // kept alive by try_begin_maintenance()
+    double threshold = RuntimeConfig::global()->auto_evict_threshold_pct();
 
     {
         std::lock_guard<std::mutex> lock(router_->load_mutex_);
@@ -68,8 +70,8 @@ void EvictionEngine::evaluate_servers(double current_vram_pct) {
         if (router_->exclusive_active_) return;
 
         auto now = std::chrono::steady_clock::now();
-        double threshold = RuntimeConfig::global()->auto_evict_threshold_pct();
         bool pressure_evict = (current_vram_pct >= threshold);
+        bool idle_evict = false;
 
         WrappedServer* best_candidate_for_eviction = nullptr;
         double highest_eviction_score = -1.0;
@@ -125,6 +127,7 @@ void EvictionEngine::evaluate_servers(double current_vram_pct) {
                 server->set_state(ModelState::EVICTING);
                 best_candidate_for_eviction = server;
                 pressure_evict = true;
+                idle_evict = true;
                 break;
             }
 
@@ -147,10 +150,41 @@ void EvictionEngine::evaluate_servers(double current_vram_pct) {
 
         if (pressure_evict && best_candidate_for_eviction) {
             model_to_evict = best_candidate_for_eviction->get_model_name();
-            best_candidate_for_eviction->set_state(ModelState::EVICTING);
-            LOG(INFO) << "Eviction Engine unloading model: " << model_to_evict << " due to score/pressure/idle." << std::endl;
+            if (!idle_evict && best_candidate_for_eviction->can_shrink() &&
+                best_candidate_for_eviction->try_begin_maintenance()) {
+                shrink_candidate = best_candidate_for_eviction;
+            } else {
+                best_candidate_for_eviction->set_state(ModelState::EVICTING);
+                LOG(INFO) << "Eviction Engine unloading model: " << model_to_evict << " due to score/pressure/idle." << std::endl;
+            }
         }
     } // release lock
+
+    // A backend that can shrink is asked first, outside the lock. If it cannot, eviction goes on as above.
+    if (shrink_candidate) {
+        const uint64_t instance = shrink_candidate->get_instance_id();
+        bool shrunk = false;
+        try {
+            shrunk = shrink_candidate->shrink_for_pressure(current_vram_pct, threshold);
+        } catch (...) {
+        }
+        shrink_candidate->end_maintenance();
+        if (shrunk) {
+            LOG(INFO) << "Model " << model_to_evict << " shrank instead of being unloaded." << std::endl;
+            model_to_evict.clear();
+        } else {
+            std::lock_guard<std::mutex> lock(router_->load_mutex_);
+            WrappedServer* s = router_->find_server_by_model_name(model_to_evict);
+            const ModelState state = s ? s->get_state() : ModelState::UNLOADED;
+            if (!router_->exclusive_active_ && s && s->get_instance_id() == instance && !s->is_busy() &&
+                state != ModelState::EVICTING && state != ModelState::UNLOADED && state != ModelState::IN_USE) {
+                s->set_state(ModelState::EVICTING);
+                LOG(INFO) << "Eviction Engine unloading model: " << model_to_evict << " due to score/pressure/idle." << std::endl;
+            } else {
+                model_to_evict.clear();
+            }
+        }
+    }
 
     // Perform downsizes outside the lock so they don't block the router. Each
     // downsize is an owned maintenance operation: try_begin_downsize() (under the
