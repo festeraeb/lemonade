@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cctype>
 #include <charconv>
+#include <cstdio>
 #include <map>
 #include <regex>
 #include <sstream>
@@ -689,6 +690,64 @@ DeviceValues device_values(const std::string& requested, const std::string& spec
     std::string gpu_uuids = choice.uuid.empty() ? device : choice.uuid;
 
     return DeviceValues{device, gpu_uuids};
+}
+
+PrepareStep parse_prepare(const json& spec) {
+    PrepareStep step;
+    if (!spec.is_object() || !spec.contains("prepare")) return step;
+    const json& p = spec["prepare"];
+    if (!p.is_object()) throw SpecError("prepare: not an object");
+    if (!p.contains("args") || !p["args"].is_array() || p["args"].empty()) {
+        throw SpecError("prepare.args: must be a non-empty array of strings (the program first)");
+    }
+    for (const auto& a : p["args"]) {
+        if (!a.is_string()) throw SpecError("prepare.args: must be a non-empty array of strings (the program first)");
+    }
+    step.args = p["args"];
+    if (p.contains("timeout_s")) {
+        if (!p["timeout_s"].is_number_integer() || p["timeout_s"].get<int64_t>() < 1 ||
+            p["timeout_s"].get<int64_t>() > 86400) {
+            throw SpecError("prepare.timeout_s: must be an integer from 1 to 86400");
+        }
+        step.timeout_s = p["timeout_s"].get<long>();
+    }
+    step.inputs = {"{model_path}"};
+    if (p.contains("inputs")) {
+        if (!p["inputs"].is_array()) throw SpecError("prepare.inputs: must be an array of strings");
+        step.inputs.clear();
+        for (const auto& i : p["inputs"]) {
+            if (!i.is_string()) throw SpecError("prepare.inputs: must be an array of strings");
+            step.inputs.push_back(i.get<std::string>());
+        }
+    }
+    step.present = true;
+    return step;
+}
+
+std::vector<std::string> prepare_argv(const PrepareStep& step, const std::map<std::string, std::string>& values) {
+    try {
+        return build_argv(json{{"args", step.args}}, values);
+    } catch (const SpecError& e) {
+        throw SpecError(std::string("prepare.args: ") + e.what());
+    }
+}
+
+std::string prepare_key(const std::vector<std::string>& argv, const std::vector<std::string>& stamps) {
+    uint64_t h = 1469598103934665603ULL;
+    const auto add = [&h](const std::string& text) {
+        for (unsigned char c : text) {
+            h ^= c;
+            h *= 1099511628211ULL;
+        }
+        h ^= 0xff;  // field separator, so {"ab"} and {"a", "b"} differ
+        h *= 1099511628211ULL;
+    };
+    for (const auto& a : argv) add(a);
+    add("--inputs--");
+    for (const auto& s : stamps) add(s);
+    char out[17];
+    std::snprintf(out, sizeof(out), "%016llx", static_cast<unsigned long long>(h));
+    return out;
 }
 
 namespace {

@@ -5,11 +5,13 @@
 #include "lemon/backends/backend_ops.h"
 #include "lemon/backends/backend_registry.h"
 #include "lemon/backends/backend_utils.h"
+#include "lemon/error_types.h"
 #include "lemon/server_process.h"
 #include "lemon/system_info.h"
 #include "lemon/utils/aixlog.hpp"
 #include "lemon/utils/http_client.h"
 #include "lemon/utils/path_utils.h"
+#include "lemon/utils/process_manager.h"
 
 #include <algorithm>
 #include <cctype>
@@ -18,6 +20,9 @@
 #include <chrono>
 #include <map>
 #include <cstdlib>
+#include <deque>
+#include <functional>
+#include <mutex>
 #include <filesystem>
 #include <fstream>
 #include <sstream>
@@ -112,6 +117,75 @@ std::string option_text(const RecipeOptions& options, const std::string& key) {
     return "";
 }
 
+// "size:mtime" of a prepare input, or "missing".
+std::string input_stamp(const std::string& path) {
+    std::error_code ec;
+    const auto size = fs::file_size(path, ec);
+    if (ec) return fs::exists(path, ec) ? "dir:" + std::to_string(fs::last_write_time(path, ec).time_since_epoch().count())
+                                        : "missing";
+    return std::to_string(size) + ":" + std::to_string(fs::last_write_time(path, ec).time_since_epoch().count());
+}
+
+// Runs the spec's prepare step before a load, once per set of inputs: a marker named by prepare_key() in
+// <cache dir>/adapter-prepare/<spec>/ records a run that exited 0. No shell; output goes to the log. A failure
+// or a timeout throws ConfigurationException with the last lines, so the router does not evict every other
+// model and retry, which is what it does after an ordinary load failure.
+void run_prepare(const std::string& name, const json& spec, const fs::path& spec_dir,
+                 std::map<std::string, std::string> values, const std::function<bool()>& cancelled) {
+    adapter::specs::PrepareStep step;
+    std::vector<std::string> argv;
+    try {
+        step = adapter::specs::parse_prepare(spec);
+        if (!step.present) return;
+        values.erase("{port}");
+        argv = adapter::specs::prepare_argv(step, values);
+    } catch (const adapter::specs::SpecError& e) {
+        throw ConfigurationException("adapter " + name + ": " + e.what());
+    }
+    try {
+        argv[0] = resolve_binary(argv[0], spec_dir);
+    } catch (const std::exception& e) {
+        throw ConfigurationException("adapter " + name + ": prepare.args[0]: " + e.what());
+    }
+    std::vector<std::string> stamps;
+    for (const auto& input : step.inputs) stamps.push_back(fill(input, values) + "=" + input_stamp(fill(input, values)));
+    const fs::path marker = fs::path(utils::get_cache_dir()) / "adapter-prepare" / name /
+                            (adapter::specs::prepare_key(argv, stamps) + ".done");
+
+    static std::mutex prepare_mutex;  // two loads of one model must not prepare at the same time
+    std::lock_guard<std::mutex> lock(prepare_mutex);
+    std::error_code ec;
+    if (fs::exists(marker, ec)) {
+        LOG(INFO, "Adapter") << name << ": prepare already done for these inputs (" << marker.filename().string() << ")"
+                             << std::endl;
+        return;
+    }
+    LOG(INFO, "Adapter") << name << ": prepare: " << argv[0] << " (timeout " << step.timeout_s << " s)" << std::endl;
+    std::deque<std::string> last;
+    const auto started = std::chrono::steady_clock::now();
+    const int code = utils::ProcessManager::run_process_with_output(
+        argv[0], std::vector<std::string>(argv.begin() + 1, argv.end()),
+        [&](const std::string& line) {
+            LOG(INFO, "Adapter") << name << " prepare: " << line << std::endl;
+            last.push_back(line);
+            if (last.size() > 20) last.pop_front();
+            return !cancelled();
+        },
+        spec_dir.string(), static_cast<int>(step.timeout_s));
+    if (code != 0) {
+        const auto took = std::chrono::duration_cast<std::chrono::seconds>(std::chrono::steady_clock::now() - started);
+        std::string why = took.count() >= step.timeout_s ? "timed out after " + std::to_string(step.timeout_s) + " s"
+                                                          : "exit " + std::to_string(code);
+        std::string tail;
+        for (const auto& line : last) tail += "\n  " + line;
+        throw ConfigurationException("adapter " + name + ": prepare failed (" + why + ")" +
+                                     (tail.empty() ? std::string(", no output") : "; last lines:" + tail));
+    }
+    fs::create_directories(marker.parent_path(), ec);
+    std::ofstream(marker) << json{{"argv", argv}, {"inputs", stamps}}.dump(1) << "\n";
+    LOG(INFO, "Adapter") << name << ": prepare done" << std::endl;
+}
+
 }  // namespace
 
 InstallParams AdapterServer::get_install_params(const std::string& /*backend*/, const std::string& /*version*/) {
@@ -148,7 +222,7 @@ void AdapterServer::load(const std::string& model_name, const ModelInfo& model_i
     const std::string ready_path = ready.value("path", std::string("/v1/models"));
     const long ready_timeout = ready.value("timeout_s", 600L);
     const std::string ready_field = ready.value("json_field", std::string{});
-    const auto load_started = std::chrono::steady_clock::now();
+    auto load_started = std::chrono::steady_clock::now();
     // identity.unreported: the engine's /v1/models carries no owned_by (Strata, PolyStrata, Nauti-Strata), so the
     // check cannot pass; the spec still names the owner for make_adapter, and the plane skips the check.
     const json identity = spec.value("identity", json::object());
@@ -197,6 +271,8 @@ void AdapterServer::load(const std::string& model_name, const ModelInfo& model_i
     if (ctx > 0) subs["{ctx}"] = std::to_string(ctx);
     // Health reports cpu unless the spec asked for a card.
     device_type_ = adapter::specs::selects_gpu(spec, requested) ? DEVICE_GPU : DEVICE_CPU;
+    run_prepare(name, spec, spec_dir, subs, [this] { return load_cancelled(); });
+    load_started = std::chrono::steady_clock::now();  // the ready timeout does not count the prepare step
 
     std::vector<std::string> args;
     const std::string override_args = option_text(options, "adapter_args");

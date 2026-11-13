@@ -331,6 +331,38 @@
       "kind": "decl",
       "used_for": "the budget request, with a 5 s timeout",
       "fingerprint": "5fd1380ef8fcbd86"
+    },
+    {
+      "id": "run-process-with-output",
+      "file": "src/cpp/include/lemon/utils/process_manager.h",
+      "anchor": "^\\s*static int run_process_with_output\\(",
+      "kind": "decl",
+      "used_for": "runs the spec's prepare step: argv without a shell, output line by line to the log, a timeout",
+      "fingerprint": "39de24f420bc34be"
+    },
+    {
+      "id": "configuration-exception",
+      "file": "src/cpp/include/lemon/error_types.h",
+      "anchor": "^class ConfigurationException\\b",
+      "kind": "block",
+      "used_for": "a failed prepare is a configuration error, so the router does not evict every model and retry",
+      "fingerprint": "4f294f07a637e25a"
+    },
+    {
+      "id": "cache-dir",
+      "file": "src/cpp/include/lemon/utils/path_utils.h",
+      "anchor": "^std::string get_cache_dir\\(",
+      "kind": "decl",
+      "used_for": "prepare markers live in <cache dir>/adapter-prepare/<spec>/",
+      "fingerprint": "4253b46c54806fe7"
+    },
+    {
+      "id": "load-cancelled",
+      "file": "src/cpp/include/lemon/wrapped_server.h",
+      "anchor": "^\\s*bool load_cancelled\\(",
+      "kind": "decl",
+      "used_for": "a cancelled load stops the prepare step at its next output line",
+      "fingerprint": "a85ce6ccbf99fe73"
     }
   ]
 }

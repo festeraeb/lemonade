@@ -201,6 +201,29 @@ Readiness ready_state(const json& status, const json& ready_spec);
 // its args or env use {device} or {gpu_uuids}. False means the engine runs on the CPU.
 bool selects_gpu(const json& spec, const std::string& requested);
 
+// ---- prepare step ----
+
+struct PrepareStep {
+    bool present = false;
+    json args;                        // the program and its arguments, still with placeholders
+    long timeout_s = 600;
+    std::vector<std::string> inputs;  // paths whose size and time decide when to run again
+};
+
+// Reads spec["prepare"]: {"args": ["<program>", ...], "timeout_s": N, "inputs": ["{model_path}", ...]}.
+// No "prepare" gives present=false. Throws SpecError naming the field when prepare is not an object,
+// args is not a non-empty array of strings, timeout_s is not an integer in 1..86400, or inputs is not an
+// array of strings. inputs defaults to ["{model_path}"].
+PrepareStep parse_prepare(const json& spec);
+
+// The prepare argv (program first), filled from `values` with build_argv's rules. A spec cannot use
+// {port} here: lemond passes no port, so build_argv names it as not supplied.
+std::vector<std::string> prepare_argv(const PrepareStep& step, const std::map<std::string, std::string>& values);
+
+// The marker name for one prepare run: a stable 64-bit FNV-1a hash, in hex, of the argv and of each
+// input's stamp (for example "size:mtime", or "missing"). The same argv and stamps give the same key.
+std::string prepare_key(const std::vector<std::string>& argv, const std::vector<std::string>& stamps);
+
 // ---- models declared by the spec ----
 
 struct DeclaredModel {

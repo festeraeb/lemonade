@@ -472,6 +472,46 @@
    "status": "new",
    "matches_old": 0,
    "matches_new": 1
+  },
+  {
+   "file": "src/cpp/include/lemon/utils/process_manager.h",
+   "symbol": "ProcessManager::run_process_with_output",
+   "pattern": "^\\s*static int run_process_with_output\\(",
+   "signature": "static int run_process_with_output( const std::string& executable, const std::vector<std::string>& args, OutputLineCallback on_line, const std::string& working_dir = \"\", int timeout_seconds = -1, bool capture_stderr = true);",
+   "role": "runs the spec's prepare step: argv without a shell, output line by line to the log, a timeout",
+   "status": "new",
+   "matches_old": 0,
+   "matches_new": 1
+  },
+  {
+   "file": "src/cpp/include/lemon/error_types.h",
+   "symbol": "ConfigurationException",
+   "pattern": "^class ConfigurationException\\b",
+   "signature": "class ConfigurationException : public LemonException {",
+   "role": "a failed prepare is a configuration error, so the router does not evict every model and retry",
+   "status": "new",
+   "matches_old": 0,
+   "matches_new": 1
+  },
+  {
+   "file": "src/cpp/include/lemon/utils/path_utils.h",
+   "symbol": "utils::get_cache_dir",
+   "pattern": "^std::string get_cache_dir\\(",
+   "signature": "std::string get_cache_dir();",
+   "role": "prepare markers live in <cache dir>/adapter-prepare/<spec>/",
+   "status": "new",
+   "matches_old": 0,
+   "matches_new": 1
+  },
+  {
+   "file": "src/cpp/include/lemon/wrapped_server.h",
+   "symbol": "WrappedServer::load_cancelled",
+   "pattern": "^\\s*bool load_cancelled\\(",
+   "signature": "bool load_cancelled() const {",
+   "role": "a cancelled load stops the prepare step at its next output line",
+   "status": "new",
+   "matches_old": 0,
+   "matches_new": 1
   }
  ]
 }

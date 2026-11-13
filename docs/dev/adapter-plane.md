@@ -11,6 +11,7 @@ It was built against Lemonade 2026.45 and 2026.46 and rebased onto `main`. It is
 - [Readiness](#readiness)
 - [Models declared by the spec](#models-declared-by-the-spec)
 - [Budget request before eviction](#budget-request-before-eviction)
+- [Prepare step](#prepare-step)
 - [Conformance levels](#conformance-levels)
 - [Running the checks](#running-the-checks)
 - [What the plane needs from lemond](#what-the-plane-needs-from-lemond)
@@ -61,6 +62,7 @@ A spec is `<name>.json` in `<config dir>/adapters/` (or `$LEMONADE_ADAPTERS_DIR`
 | `ready` | Readiness probe, see [Readiness](#readiness). |
 | `identity.owned_by` | When set, `/v1/models` must report this owner or the engine is stopped. |
 | `telemetry_path`, `memory_path`, `budget_path` | Engine routes for statistics, the memory report and the [budget request](#budget-request-before-eviction). |
+| `prepare` | A command run once before the first load, see [Prepare step](#prepare-step). |
 | `models` | Models the spec offers without a registration, see [Models declared by the spec](#models-declared-by-the-spec). |
 | `telemetry` | `{enabled, env, what}`: extra environment applied only when `enabled` is true or the user sets `adapter_telemetry=on`. Off by default. |
 
@@ -144,6 +146,27 @@ lemond POSTs `{"device": "<uuid>", "mib": N}` and expects `{"accepted": true, "n
 
 In lemond this is `WrappedServer::can_shrink()` and `shrink_for_pressure(used, target)`, both "cannot" by default, called from `EvictionEngine::evaluate_servers()` with no router lock held. `WrappedServer::try_begin_maintenance()` keeps the model alive during the call, the way a downsize does.
 
+## Prepare step
+
+A spec may name a command that must run before an engine can load a model, such as a format conversion.
+
+```json
+"prepare": {
+  "args": ["{spec_dir}/convert.py", "--model", "{model_path}"],
+  "timeout_s": 600,
+  "inputs": ["{model_path}"]
+}
+```
+
+- `args` is an argv array, program first, with the same placeholders and the same no-shell rule as `args`. `{port}` is refused: no port exists yet. The program is found the way `binary` is.
+- The command runs in the spec folder with lemond's environment. Its output goes to the log line by line.
+- `timeout_s` defaults to 600. `inputs` defaults to `["{model_path}"]`.
+- A run that exits 0 leaves a marker in `<cache dir>/adapter-prepare/<spec>/`, named by a hash of the filled argv and each input's size and time. While those are unchanged the command is not run again.
+- A failure or a timeout fails the load with the command's last lines. It is raised as a configuration error, so the router does not evict every other model and retry the load.
+- The spec's `ready.timeout_s` counts from the end of the prepare step.
+
+This is inside the adapter and needs nothing from lemond. `load()` has no timeout of its own in the router, so a long step needs no core change.
+
 ## Conformance levels
 
 `tools/adapter_conformance.py` grades one adapter against a running lemond and reports the highest level it earns. Failing a level is a downgrade, not a removal: level 0 needs no test because the engine can always be run without control, for example as a provider.
@@ -165,7 +188,7 @@ L4 cannot pass on a stock `lemond` today, for the reason in the next section.
 All commands run from the repository root. `BUILD_DIR` names a configured build; the unit tests take the `nlohmann/json` header from its `_deps` folder (or set `JSON_INCLUDE`).
 
 ```bash
-# Unit tests for the pure spec module, one job at a time (ap2 ap3 ap4 ap5 ap6 ap7 ap8 ap10 ap11 ap12 ap13 ap14)
+# Unit tests for the pure spec module, one job at a time (ap2 ap3 ap4 ap5 ap6 ap7 ap8 ap10 ap11 ap12 ap13 ap14 ap15)
 BUILD_DIR=build bash test/cpp/adapter_spec/run.sh ap2
 
 # Conformance tool unit tests
@@ -178,6 +201,7 @@ ADAPTER_LIVE_PORT=14300 python3 test/cpp/adapter_spec/live/spec_wiring_live.py b
 # Live tests for the optional hooks, each with its own throwaway tree and the fixture engine
 python3 test/cpp/adapter_spec/live/declared_models_live.py build/lemond
 python3 test/cpp/adapter_spec/live/budget_live.py build/lemond
+python3 test/cpp/adapter_spec/live/prepare_live.py build/lemond
 
 # Do the Lemonade declarations the backend depends on still match?
 python3 tools/adapter_hook_map.py --check
@@ -215,6 +239,7 @@ R1 to R17 are the requests we drew up while building the plane. The plane works 
 | R16 | Versioned spec, unknown fields ignored, missing required fields give L0 | Specs outlive daemon versions | `check_spec()` | In the plane |
 | R17 | Hook map with fingerprints and a CI check | Tells the author what moved | `hook_map.json`, `adapter_hook_map.py`, `adapter_hook_check.py` | In the plane |
 | R18 | Models declared by the spec | An engine ships with the models it serves | Each model had to be registered in `user_models.json` | Optional hook: a `backend_declared` catalog source and `BackendOps::declared_models()` |
+| R19 | One-time prepare step before the first load | Some engines convert a model before serving it | Needed in-tree code in `load()` | In the plane: `prepare` |
 
 `cesarops/adapter-hooks` also fills `{ctx}` (the recipe's `ctx_size`, else the model's registered window) and reports `device` as `cpu` for a spec that selects no GPU.
 
