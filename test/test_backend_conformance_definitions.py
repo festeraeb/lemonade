@@ -86,6 +86,61 @@ class MatchesLemond(unittest.TestCase):
             "sha256:" + hashlib.sha256(compact.encode()).hexdigest(),
         )
 
+    def test_device_flag_of_a_hook_free_external_definition(self):
+        ref = {"ref": "/options/eng_device"}
+        d = {
+            "schema_version": 1,
+            "id": "eng",
+            "recipe": "eng",
+            "metadata": {
+                "options": [
+                    {"name": "eng_device", "type_name": "DEVICES", "default_value": ""}
+                ]
+            },
+            "launch": {
+                "argv": [
+                    {"args": ["--port", {"string": {"ref": "/launch/ports/http"}}]},
+                    {
+                        "when": {"not": {"eq": [ref, ""]}},
+                        "args": ["--device", {"string": ref}],
+                    },
+                ]
+            },
+            "operations": [],
+        }
+        f = bc.facts(d)
+        self.assertEqual(f["device_option"], "eng_device")
+        self.assertTrue(f["device_bound"])
+        self.assertEqual(f["device_flag"], "--device")
+
+    def test_device_carried_in_the_environment_has_no_flag(self):
+        d = {
+            "schema_version": 1,
+            "id": "eng",
+            "recipe": "eng",
+            "metadata": {
+                "options": [
+                    {"name": "eng_device", "type_name": "DEVICES", "default_value": "0"}
+                ]
+            },
+            "launch": {
+                "argv": [{"args": ["serve"]}],
+                "environment": {
+                    "preset": "inherit",
+                    "set": [
+                        {
+                            "name": "CUDA_VISIBLE_DEVICES",
+                            "value": {"string": {"ref": "/options/eng_device"}},
+                        }
+                    ],
+                },
+            },
+            "operations": [],
+        }
+        f = bc.facts(d)
+        self.assertTrue(f["device_bound"])
+        self.assertIsNone(f["device_flag"])
+
     def test_definition_found_by_builtin_path(self):
         path = str(bc.BUILTIN_DIR / "llamacpp.json")
         self.assertEqual(

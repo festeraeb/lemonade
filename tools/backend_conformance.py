@@ -220,13 +220,31 @@ def definition_hash(declaration: dict) -> str:
 
 
 def option_refs(node, names: set[str]) -> bool:
+    """True when the node names one of the options, either as a launch record's
+    `option` or as an expression `{"ref": "/options/NAME"}`."""
     if isinstance(node, dict):
         if node.get("option") in names:
+            return True
+        ref = node.get("ref")
+        if isinstance(ref, str) and ref.startswith("/options/") and ref[9:] in names:
             return True
         return any(option_refs(v, names) for v in node.values())
     if isinstance(node, list):
         return any(option_refs(v, names) for v in node)
     return False
+
+
+def record_flag(record: dict, names: set[str]):
+    """The flag a launch argv record gives the option's value to: the record's
+    own `flag`, or the plain string just before the expression that refers to
+    the option in its `args`."""
+    if record.get("flag"):
+        return record["flag"]
+    args = record.get("args") or []
+    for i, arg in enumerate(args):
+        if i and option_refs(arg, names) and isinstance(args[i - 1], str):
+            return args[i - 1]
+    return None
 
 
 def facts(declaration: dict) -> dict:
@@ -252,7 +270,7 @@ def facts(declaration: dict) -> dict:
         "readiness": launch.get("readiness"),
         "device_option": device.get("name") if device else None,
         "device_bound": bool(names) and option_refs(launch, names),
-        "device_flag": argv[0].get("flag") if argv else None,
+        "device_flag": record_flag(argv[0], names) if argv else None,
         "metrics": bool(meta.get("exposes_prometheus_metrics")),
         "chat": "chat_completion" in operations
         or "chat" in meta.get("supported_modes", []),

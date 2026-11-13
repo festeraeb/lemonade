@@ -38,7 +38,7 @@ The tool resolves `extends`, `merge` and `edits` as described in [Backend defini
 | Load timeout | `launch.readiness.timeout` |
 | A request to answer | An `operations` record with `operation: chat_completion`, or `chat` in `metadata.supported_modes` |
 | The device option to send in `POST /v1/load` | The `metadata.options` record with `id: device` (v1: `type_name: DEVICES`), by its `name` |
-| That the option reaches the engine | A `launch` record that refers to that option; its `flag` is looked up in `launch_command` |
+| That the option reaches the engine | A `launch` record that refers to that option, by `option` or by a `/options/NAME` reference in its `args`. Its `flag`, or the argument just before the reference, is looked up in `launch_command`. An option carried only in `launch.environment` has no flag to look up, and L3 then rests on the GPU reading |
 | Whether the engine's metrics are forwarded | `metadata.exposes_prometheus_metrics` |
 
 When several definitions share a recipe, such as container variants selected by the backend option, the schema row names one of them and the other hashes are not compared.
@@ -56,7 +56,7 @@ python3 -m unittest test/test_backend_conformance_definitions.py \
 python3 tools/backend_conformance.py --lemond http://127.0.0.1:13305 \
     --definition llamacpp --model MODEL --other MODEL2 --device CUDA1
 
-# External definition
+# External definition (hook-free v1 or a child of llamacpp@1)
 python3 tools/backend_conformance.py --lemond http://127.0.0.1:13305 \
     --backends-d ~/.config/lemonade/backends.d --definition research-llama \
     --model MODEL --other MODEL2 --device none --cpu-only
