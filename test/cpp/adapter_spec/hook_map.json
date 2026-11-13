@@ -512,6 +512,36 @@
    "status": "new",
    "matches_old": 0,
    "matches_new": 1
+  },
+  {
+   "file": "src/cpp/include/lemon/wrapped_server.h",
+   "symbol": "WrappedServer::request_backend_reset_from_watchdog",
+   "pattern": "^\\s*void request_backend_reset_from_watchdog\\(",
+   "signature": "void request_backend_reset_from_watchdog(const std::string& reason);",
+   "role": "the health probe marks a hung engine unavailable and stops it, as lemond's watchdog does",
+   "status": "new",
+   "matches_old": 0,
+   "matches_new": 1
+  },
+  {
+   "file": "src/cpp/include/lemon/wrapped_server.h",
+   "symbol": "WrappedServer::was_watchdog_triggered",
+   "pattern": "^\\s*bool was_watchdog_triggered\\(",
+   "signature": "bool was_watchdog_triggered() const {",
+   "role": "the health probe stops once the engine was reset by anyone",
+   "status": "new",
+   "matches_old": 0,
+   "matches_new": 1
+  },
+  {
+   "file": "src/cpp/server/router.cpp",
+   "symbol": "Router::prune_unavailable_servers_locked",
+   "pattern": "^void Router::prune_unavailable_servers_locked\\(",
+   "signature": "void Router::prune_unavailable_servers_locked() {",
+   "role": "an engine the probe reset is evicted by the router and reloaded on the next request",
+   "status": "new",
+   "matches_old": 0,
+   "matches_new": 1
   }
  ]
 }

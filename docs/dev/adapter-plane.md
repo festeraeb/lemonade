@@ -12,6 +12,7 @@ It was built against Lemonade 2026.45 and 2026.46 and rebased onto `main`. It is
 - [Models declared by the spec](#models-declared-by-the-spec)
 - [Budget request before eviction](#budget-request-before-eviction)
 - [Prepare step](#prepare-step)
+- [Health probe](#health-probe)
 - [Conformance levels](#conformance-levels)
 - [Running the checks](#running-the-checks)
 - [What the plane needs from lemond](#what-the-plane-needs-from-lemond)
@@ -62,6 +63,7 @@ A spec is `<name>.json` in `<config dir>/adapters/` (or `$LEMONADE_ADAPTERS_DIR`
 | `ready` | Readiness probe, see [Readiness](#readiness). |
 | `identity.owned_by` | When set, `/v1/models` must report this owner or the engine is stopped. |
 | `telemetry_path`, `memory_path`, `budget_path` | Engine routes for statistics, the memory report and the [budget request](#budget-request-before-eviction). |
+| `health` | A probe with a latency budget, see [Health probe](#health-probe). |
 | `prepare` | A command run once before the first load, see [Prepare step](#prepare-step). |
 | `models` | Models the spec offers without a registration, see [Models declared by the spec](#models-declared-by-the-spec). |
 | `telemetry` | `{enabled, env, what}`: extra environment applied only when `enabled` is true or the user sets `adapter_telemetry=on`. Off by default. |
@@ -167,6 +169,21 @@ A spec may name a command that must run before an engine can load a model, such 
 
 This is inside the adapter and needs nothing from lemond. `load()` has no timeout of its own in the router, so a long step needs no core change.
 
+## Health probe
+
+lemond's watchdog probes an engine only while a request is active, and only after 90 seconds without progress. A spec can ask for a probe that also runs while the engine is idle, with its own budget.
+
+```json
+"health": {"path": "/health", "interval_s": 10, "timeout_ms": 2000, "fail_after": 3}
+```
+
+- Every `interval_s` the adapter GETs `path`. A probe misses unless it answers HTTP 200 within `timeout_ms`. A probe with no answer is given up after `timeout_ms` rounded up to a whole second.
+- After `fail_after` misses in a row, the adapter calls `WrappedServer::request_backend_reset_from_watchdog()`. That is the path lemond's watchdog already takes for a hung backend: the model is marked unavailable (`watchdog_reset`), its process is stopped, the router prunes it and reloads it on the next request.
+- `path` is required. `interval_s` defaults to 10, `timeout_ms` to 2000, `fail_after` to 3. A wrong type refuses the load, naming the field.
+- An engine that cannot answer `path` while it generates needs a larger `timeout_ms`, or no `health`.
+
+This needs nothing from lemond: `request_backend_reset_from_watchdog()` is already public.
+
 ## Conformance levels
 
 `tools/adapter_conformance.py` grades one adapter against a running lemond and reports the highest level it earns. Failing a level is a downgrade, not a removal: level 0 needs no test because the engine can always be run without control, for example as a provider.
@@ -188,7 +205,7 @@ L4 cannot pass on a stock `lemond` today, for the reason in the next section.
 All commands run from the repository root. `BUILD_DIR` names a configured build; the unit tests take the `nlohmann/json` header from its `_deps` folder (or set `JSON_INCLUDE`).
 
 ```bash
-# Unit tests for the pure spec module, one job at a time (ap2 ap3 ap4 ap5 ap6 ap7 ap8 ap10 ap11 ap12 ap13 ap14 ap15)
+# Unit tests for the pure spec module, one job at a time (ap2 ap3 ap4 ap5 ap6 ap7 ap8 ap10 ap11 ap12 ap13 ap14 ap15 ap16)
 BUILD_DIR=build bash test/cpp/adapter_spec/run.sh ap2
 
 # Conformance tool unit tests
@@ -202,6 +219,7 @@ ADAPTER_LIVE_PORT=14300 python3 test/cpp/adapter_spec/live/spec_wiring_live.py b
 python3 test/cpp/adapter_spec/live/declared_models_live.py build/lemond
 python3 test/cpp/adapter_spec/live/budget_live.py build/lemond
 python3 test/cpp/adapter_spec/live/prepare_live.py build/lemond
+python3 test/cpp/adapter_spec/live/health_probe_live.py build/lemond
 
 # Do the Lemonade declarations the backend depends on still match?
 python3 tools/adapter_hook_map.py --check
@@ -211,7 +229,7 @@ python3 tools/adapter_hook_check.py
 python3 tools/adapter_conformance.py --lemond http://127.0.0.1:13305 --model <model> --other <model2> --device 0
 ```
 
-The live test currently reports 12 of 13 passing. The failing case, "stats carry the engine's memory report", is the missing router hook described below.
+With the telemetry hook in place `spec_wiring_live.py` passes 20 of 20 on a host with an NVIDIA card (its device checks are skipped without one). Each hook's live test starts its own lemond with a PATH that holds no GPU tool, and uses the fixture engine `fake_engine.py`, whose numbers are made up by the test.
 
 `src/cpp/server/backends/adapter/hook_map.json` lists the Lemonade declarations the backend uses (descriptor, `ServerCommand`, `WrappedServer` methods and so on) with a fingerprint of each. `adapter_hook_map.py --check` names any that changed; `--update` rewrites the fingerprints after the backend has been adapted. `test/cpp/adapter_spec/hook_map.json` is a second record of the same dependencies as file, symbol and signature; `adapter_hook_check.py` re-greps it.
 
@@ -226,7 +244,7 @@ R1 to R17 are the requests we drew up while building the plane. The plane works 
 | R3 | Spec sources limited to signed catalogues or a local folder; env by allowlist | A spec starts a process | Local folder only; allowlist enforced | Allowlist in the plane; signed catalogues are yours to decide |
 | R4 | Port allocated by lemond | Avoids collisions | `{port}` comes from lemond's `choose_port()` | In the plane |
 | R5 | Probe states starting, loading (progress), ready, warm; timeout per spec | Large models load for minutes; honest UI | `AdapterServer::load()` classifies each probe with `ready_state()` (ready, warm, loading, error), counts the spec timeout from the start of the load, and logs loading progress | In `cesarops/adapter-hooks`; the model is not listed by `/health` until the load ends, so progress is in the log only |
-| R6 | Health as a probe with a latency budget | A hung engine should leave rotation | lemond's existing health flag | Not built |
+| R6 | Health as a probe with a latency budget | A hung engine should leave rotation | The spec's `health` probe resets a hung engine through lemond's watchdog path; the router prunes and reloads it | In the plane |
 | R7 | Per-level conformance with downgrade | Keep the control the adapter earned | `adapter_conformance.py` reports the level; lemond does not act on it at runtime | Tool in the plane; runtime use needs lemond |
 | R8 | Unload verified against the device | One wrong adapter must not break eviction | `unload()` checks `nvidia-smi` / `rocm-smi` for the engine's process tree and kills a leftover holder; the tool checks the device too | In the plane (Linux) |
 | R9 | Memory report per device and tier | MoE engines span VRAM, host RAM, remote memory | `adapter_memory` is built by `memory_telemetry()`; `Router::collect_engine_telemetry()` calls `get_additional_telemetry()` on each loaded engine and `/api/v1/stats` returns it under `engine_telemetry.<model>` | In `cesarops/adapter-hooks` |

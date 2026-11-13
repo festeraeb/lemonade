@@ -1,9 +1,12 @@
 #pragma once
 
+#include <condition_variable>
 #include <cstdint>
 #include <map>
 #include <memory>
+#include <mutex>
 #include <string>
+#include <thread>
 
 #include "lemon/backends/backend_registry.h"
 #include "lemon/backends/backend_utils.h"
@@ -20,6 +23,7 @@ public:
 
     AdapterServer(const std::string& log_level, ModelManager* model_manager,
                   BackendManager* backend_manager);
+    ~AdapterServer() override;
 
     void load(const std::string& model_name, const ModelInfo& model_info,
               const RecipeOptions& options, bool do_not_upgrade = false) override;
@@ -47,6 +51,15 @@ private:
     std::string memory_path_;
     std::string budget_path_;
     std::string device_uuid_;
+
+    // R6: the spec's health probe. After fail_after misses in a row the engine is reset through
+    // request_backend_reset_from_watchdog(), the path lemond's own watchdog takes for a hung backend.
+    void probe_loop(const std::string& path, long interval_s, long timeout_ms, int fail_after);
+    void stop_probe();
+    std::thread probe_thread_;
+    std::mutex probe_mutex_;
+    std::condition_variable probe_cv_;
+    bool probe_stop_ = false;
     bool completion_ = true;
 };
 

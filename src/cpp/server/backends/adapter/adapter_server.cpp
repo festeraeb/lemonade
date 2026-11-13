@@ -196,6 +196,56 @@ AdapterServer::AdapterServer(const std::string& log_level, ModelManager* model_m
                              BackendManager* backend_manager)
     : WrappedServer("adapter", log_level, model_manager, backend_manager) {}
 
+AdapterServer::~AdapterServer() {
+    stop_probe();
+}
+
+void AdapterServer::stop_probe() {
+    {
+        std::lock_guard<std::mutex> lock(probe_mutex_);
+        probe_stop_ = true;
+    }
+    probe_cv_.notify_all();
+    if (probe_thread_.joinable()) probe_thread_.join();
+}
+
+void AdapterServer::probe_loop(const std::string& path, long interval_s, long timeout_ms, int fail_after) {
+    const std::string url = get_base_url() + path;
+    const long http_timeout_s = std::max<long>(1, (timeout_ms + 999) / 1000);
+    adapter::specs::HealthCount count{fail_after};
+    std::unique_lock<std::mutex> lock(probe_mutex_);
+    while (!probe_cv_.wait_for(lock, std::chrono::seconds(interval_s), [this] { return probe_stop_; })) {
+        lock.unlock();
+        int status = 0;
+        std::string error;
+        const auto started = std::chrono::steady_clock::now();
+        try {
+            status = utils::HttpClient::get(url, {}, http_timeout_s, utils::HttpSecurityPolicy::TrustedLoopback).status_code;
+        } catch (const std::exception& e) {
+            error = e.what();
+        }
+        const long ms = static_cast<long>(std::chrono::duration_cast<std::chrono::milliseconds>(
+                                              std::chrono::steady_clock::now() - started).count());
+        const bool unhealthy = count.record(status, ms, timeout_ms);
+        if (count.misses > 0) {
+            LOG(WARNING, "Adapter") << spec_name_ << ": health probe " << path << " missed " << count.misses << "/"
+                                    << fail_after << " ("
+                                    << (!error.empty() ? error
+                                        : status != 200 ? "HTTP " + std::to_string(status)
+                                                        : "answered in " + std::to_string(ms) + " ms")
+                                    << ", budget " << timeout_ms << " ms)" << std::endl;
+        }
+        lock.lock();
+        if (probe_stop_ || was_watchdog_triggered()) return;
+        if (unhealthy) {
+            lock.unlock();
+            request_backend_reset_from_watchdog("adapter health probe: " + path + " missed " + std::to_string(fail_after) +
+                                                " times in a row (budget " + std::to_string(timeout_ms) + " ms)");
+            return;
+        }
+    }
+}
+
 void AdapterServer::load(const std::string& model_name, const ModelInfo& model_info,
                          const RecipeOptions& options, bool /*do_not_upgrade*/) {
   try {
@@ -217,6 +267,14 @@ void AdapterServer::load(const std::string& model_name, const ModelInfo& model_i
         throw std::runtime_error("adapter " + name + ": the spec cannot be used (" + problems +
                                  "); run the engine without control instead");
     }
+
+    adapter::specs::HealthProbe health;
+    try {
+        health = adapter::specs::parse_health(spec);
+    } catch (const adapter::specs::SpecError& e) {
+        throw ConfigurationException("adapter " + name + ": " + e.what());
+    }
+    stop_probe();
 
     const json ready = spec.value("ready", json::object());
     const std::string ready_path = ready.value("path", std::string("/v1/models"));
@@ -384,6 +442,15 @@ void AdapterServer::load(const std::string& model_name, const ModelInfo& model_i
         }
     }
     LOG(INFO, "Adapter") << name << " ready on port " << port_ << std::endl;
+    if (health.present) {
+        probe_stop_ = false;
+        probe_thread_ = std::thread([this, health] {
+            probe_loop(health.path, health.interval_s, health.timeout_ms, health.fail_after);
+        });
+        LOG(INFO, "Adapter") << name << ": health probe " << health.path << " every " << health.interval_s
+                             << " s, budget " << health.timeout_ms << " ms, " << health.fail_after
+                             << " misses in a row mark it unhealthy" << std::endl;
+    }
   } catch (const nlohmann::json::exception& e) {
     throw std::runtime_error(std::string("adapter spec for '") + model_name + "': a field has the wrong type (" +
                              e.what() + ")");
@@ -546,6 +613,7 @@ bool AdapterServer::shrink_for_pressure(double used, double target) {
 }
 
 void AdapterServer::unload() {
+    stop_probe();
 #ifdef __linux__
     const std::vector<int> tree = process_tree(get_process_id());
 #endif

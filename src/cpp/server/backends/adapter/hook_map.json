@@ -363,6 +363,30 @@
       "kind": "decl",
       "used_for": "a cancelled load stops the prepare step at its next output line",
       "fingerprint": "a85ce6ccbf99fe73"
+    },
+    {
+      "id": "watchdog-reset",
+      "file": "src/cpp/include/lemon/wrapped_server.h",
+      "anchor": "^\\s*void request_backend_reset_from_watchdog\\(",
+      "kind": "decl",
+      "used_for": "the health probe marks a hung engine unavailable and stops it, as lemond's watchdog does",
+      "fingerprint": "54fc95c079ad9d13"
+    },
+    {
+      "id": "watchdog-triggered",
+      "file": "src/cpp/include/lemon/wrapped_server.h",
+      "anchor": "^\\s*bool was_watchdog_triggered\\(",
+      "kind": "decl",
+      "used_for": "the health probe stops once the engine was reset by anyone",
+      "fingerprint": "d95348e8b416bc58"
+    },
+    {
+      "id": "prune-unavailable",
+      "file": "src/cpp/server/router.cpp",
+      "anchor": "^void Router::prune_unavailable_servers_locked\\(",
+      "kind": "block",
+      "used_for": "an engine the probe reset is evicted by the router and reloaded on the next request",
+      "fingerprint": "83201a1ea14ed13a"
     }
   ]
 }

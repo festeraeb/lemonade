@@ -224,6 +224,29 @@ std::vector<std::string> prepare_argv(const PrepareStep& step, const std::map<st
 // input's stamp (for example "size:mtime", or "missing"). The same argv and stamps give the same key.
 std::string prepare_key(const std::vector<std::string>& argv, const std::vector<std::string>& stamps);
 
+// ---- health probe with a latency budget (R6) ----
+
+struct HealthProbe {
+    bool present = false;
+    std::string path;
+    long interval_s = 10;
+    long timeout_ms = 2000;
+    int fail_after = 3;
+};
+
+// Reads spec["health"]: {"path": "/health", "interval_s": 10, "timeout_ms": 2000, "fail_after": 3}. No
+// "health" gives present=false. "path" is required and starts with "/"; interval_s (1..3600), timeout_ms
+// (50..600000) and fail_after (1..100) are optional integers. Throws SpecError naming the field.
+HealthProbe parse_health(const json& spec);
+
+// Consecutive missed probes. A probe misses unless it answered HTTP 200 within timeout_ms.
+struct HealthCount {
+    int fail_after;
+    int misses = 0;
+    // Records one probe; true once `fail_after` probes in a row have missed. An answer resets the count.
+    bool record(int status, long elapsed_ms, long timeout_ms);
+};
+
 // ---- models declared by the spec ----
 
 struct DeclaredModel {

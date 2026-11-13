@@ -8,6 +8,7 @@
 #include <regex>
 #include <sstream>
 #include <string>
+#include <type_traits>
 #include <unordered_set>
 #include <vector>
 
@@ -748,6 +749,38 @@ std::string prepare_key(const std::vector<std::string>& argv, const std::vector<
     char out[17];
     std::snprintf(out, sizeof(out), "%016llx", static_cast<unsigned long long>(h));
     return out;
+}
+
+HealthProbe parse_health(const json& spec) {
+    HealthProbe probe;
+    if (!spec.is_object() || !spec.contains("health")) return probe;
+    const json& h = spec["health"];
+    if (!h.is_object()) throw SpecError("health: not an object");
+    if (!h.contains("path") || !h["path"].is_string() || h["path"].get<std::string>().rfind("/", 0) != 0) {
+        throw SpecError("health.path: must be a string starting with /");
+    }
+    probe.path = h["path"].get<std::string>();
+    const auto read = [&h](const char* key, int64_t lo, int64_t hi, auto& out) {
+        if (!h.contains(key)) return;
+        if (!h[key].is_number_integer() || h[key].get<int64_t>() < lo || h[key].get<int64_t>() > hi) {
+            throw SpecError(std::string("health.") + key + ": must be an integer from " + std::to_string(lo) +
+                            " to " + std::to_string(hi));
+        }
+        out = static_cast<std::decay_t<decltype(out)>>(h[key].get<int64_t>());
+    };
+    read("interval_s", 1, 3600, probe.interval_s);
+    read("timeout_ms", 50, 600000, probe.timeout_ms);
+    read("fail_after", 1, 100, probe.fail_after);
+    probe.present = true;
+    return probe;
+}
+
+bool HealthCount::record(int status, long elapsed_ms, long timeout_ms) {
+    if (status == 200 && elapsed_ms <= timeout_ms) {
+        misses = 0;
+        return false;
+    }
+    return ++misses >= fail_after;
 }
 
 namespace {
