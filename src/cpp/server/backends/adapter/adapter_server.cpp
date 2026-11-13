@@ -11,6 +11,7 @@
 #include "lemon/utils/http_client.h"
 #include "lemon/utils/path_utils.h"
 
+#include <algorithm>
 #include <cctype>
 #include <csignal>
 #include <cstdio>
@@ -458,6 +459,56 @@ public:
         }
         throw std::runtime_error("adapter " + name + ": '" + path + "' or the spec " +
                                  (fs::path(adapters_dir()) / (name + ".json")).string() + " is missing on this machine");
+    }
+    // The context window a spec's model entry (or a registration's "adapter_ctx") declares; lemond clears
+    // max_context_window before asking, and reads no metadata from an engine's model file itself.
+    void populate_metadata(ModelInfo& info, const BackendOpsContext& /*ctx*/) const override {
+        if (const auto ctx = info.extra<int64_t>("adapter_ctx", 0); ctx > 0) info.max_context_window = ctx;
+    }
+    // Each installed spec's "models" list. A model whose file is missing is still offered, and is_downloaded()
+    // reports it as not downloaded, as for a registration. A broken spec or entry costs only itself.
+    std::vector<ModelInfo> declared_models() const override {
+        std::vector<ModelInfo> out;
+        std::error_code ec;
+        std::vector<fs::path> files;
+        for (const auto& entry : fs::directory_iterator(adapters_dir(), ec)) {
+            if (entry.path().extension() == ".json" && specs::valid_spec_name(entry.path().stem().string())) {
+                files.push_back(entry.path());
+            }
+        }
+        std::sort(files.begin(), files.end());
+        for (const auto& file : files) {
+            const std::string name = file.stem().string();
+            json spec;
+            try {
+                std::ifstream in(file);
+                in >> spec;
+            } catch (const std::exception& e) {
+                LOG(WARNING, "Adapter") << "adapter spec '" << name << "': not valid JSON, its models are not offered ("
+                                        << e.what() << ")" << std::endl;
+                continue;
+            }
+            const auto declared = specs::declared_models(spec, name, file.parent_path().string());
+            for (const auto& line : declared.skipped) {
+                LOG(WARNING, "Adapter") << line << "; entry skipped" << std::endl;
+            }
+            for (const auto& m : declared.models) {
+                ModelInfo info;
+                info.model_name = m.name;
+                info.checkpoints["main"] = name + "::" + m.path;
+                info.resolved_paths["main"] = m.path;
+                info.recipe = descriptor.recipe;
+                info.labels = m.labels.empty() ? std::vector<std::string>{"chat"} : m.labels;
+                info.type = get_model_type_from_labels(info.labels);
+                info.device = descriptor.default_device;
+                if (m.ctx > 0) info.extras["adapter_ctx"] = m.ctx;
+                info.suggested = true;
+                const auto bytes = fs::is_regular_file(m.path, ec) ? fs::file_size(m.path, ec) : 0;
+                if (!ec) info.size = static_cast<double>(bytes) / (1024.0 * 1024.0 * 1024.0);
+                out.push_back(std::move(info));
+            }
+        }
+        return out;
     }
 };
 }  // namespace

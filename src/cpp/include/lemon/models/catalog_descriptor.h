@@ -16,6 +16,7 @@ inline constexpr int builtin_registry = 0;
 inline constexpr int registrations = 10;
 inline constexpr int configured = 15;
 inline constexpr int scan = 20;
+inline constexpr int backend_declared = 25;
 inline constexpr int backend_discovery = 30;
 inline constexpr int cloud_listing = 40;
 }  // namespace catalog_rank

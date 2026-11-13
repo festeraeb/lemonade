@@ -146,6 +146,11 @@ public:
         return {};
     }
 
+    // Models a backend offers from its own configuration while its recipe also takes
+    // registrations (dynamic_models = false). Listed after registrations; a name a
+    // built-in or a registration holds stays theirs. Default: none.
+    virtual std::vector<ModelInfo> declared_models() const { return {}; }
+
     // Whether a model's local artifacts are present. Default: the artifact
     // store's checkpoint-completeness check.
     virtual bool is_downloaded(const ModelInfo& info, const BackendOpsContext& ctx) const;

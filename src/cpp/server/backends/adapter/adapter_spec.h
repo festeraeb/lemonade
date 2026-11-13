@@ -188,6 +188,27 @@ Readiness ready_state(const json& status, const json& ready_spec);
 // its args or env use {device} or {gpu_uuids}. False means the engine runs on the CPU.
 bool selects_gpu(const json& spec, const std::string& requested);
 
+// ---- models declared by the spec ----
+
+struct DeclaredModel {
+    std::string name;
+    std::string path;                 // absolute: a relative "path" is joined to the spec folder
+    std::vector<std::string> labels;
+    int64_t ctx = 0;                  // 0 when the entry gives none
+};
+struct DeclaredModels {
+    std::vector<DeclaredModel> models;
+    std::vector<std::string> skipped;  // one line per entry left out, naming the spec and the field
+};
+
+// Reads spec["models"]: [{"name": "...", "path": "...", "labels": ["..."], "ctx": N}]. "name" and "path"
+// are required; "labels" (array of strings) and "ctx" (positive integer) are optional. A name is letters,
+// digits, - _ . (first character a letter or digit, at most 128) and may not start with "user.", "extra."
+// or "builtin.", which are lemond's source prefixes. An entry that breaks a rule, or repeats an earlier
+// name, is skipped with a line in `skipped`; it never throws. No "models" gives an empty result; a
+// "models" that is not an array gives one skipped line. Unknown entry fields are ignored.
+DeclaredModels declared_models(const json& spec, const std::string& spec_name, const std::string& spec_dir);
+
 }  // namespace specs
 }  // namespace adapter
 }  // namespace backends

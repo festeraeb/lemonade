@@ -275,6 +275,30 @@
       "kind": "decl",
       "used_for": "the engine's root pid, to collect its process tree before stopping it (verified unload)",
       "fingerprint": "5e916774acbb0dc9"
+    },
+    {
+      "id": "ops-declared-models",
+      "file": "src/cpp/include/lemon/backends/backend_ops.h",
+      "anchor": "^\\s*virtual std::vector<ModelInfo> declared_models\\(",
+      "kind": "decl",
+      "used_for": "AdapterOps::declared_models offers each installed spec's models array",
+      "fingerprint": "f5ea17d2b38c5737"
+    },
+    {
+      "id": "ops-populate-metadata",
+      "file": "src/cpp/include/lemon/backends/backend_ops.h",
+      "anchor": "^\\s*virtual void populate_metadata\\(",
+      "kind": "decl",
+      "used_for": "AdapterOps::populate_metadata sets max_context_window from a declared ctx",
+      "fingerprint": "88e3f7003a6950d3"
+    },
+    {
+      "id": "model-extra",
+      "file": "src/cpp/include/lemon/models/model_info.h",
+      "anchor": "^\\s*T extra\\(const std::string& key",
+      "kind": "decl",
+      "used_for": "the declared ctx travels as extras[\"adapter_ctx\"]",
+      "fingerprint": "5a093a53bc917d68"
     }
   ]
 }

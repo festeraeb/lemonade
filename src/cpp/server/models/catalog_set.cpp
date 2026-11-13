@@ -1,3 +1,4 @@
+#include <lemon/canonical_id.h>
 #include <lemon/models/catalog_set.h>
 #include <lemon/models/listed_catalog.h>
 #include <lemon/utils/aixlog.hpp>
@@ -61,6 +62,34 @@ std::vector<std::shared_ptr<ModelCatalog>> product_catalogs(const CatalogSetDeps
                 LOG(INFO, "ModelManager") << "Warning: Discovered model '" << name
                                           << "' conflicts with another extra.* registration; skipping."
                                           << std::endl;
+            }));
+    }
+
+    if (deps.declared_models) {
+        catalogs.push_back(std::make_shared<EnumeratedCatalog>(
+            make_catalog_descriptor(
+                "backend_declared", catalog_rank::backend_declared, Conflict::KeepExisting,
+                DocEntry{"backend-declared", "Backend-declared models",
+                         "Models a backend offers from its own configuration.",
+                         {"A name a built-in model or a registration holds stays theirs."}, ""},
+                "", true),
+            [declared = deps.declared_models](const CatalogAccumulator& claimed) {
+                std::vector<ModelInfo> offered;
+                for (auto& info : declared()) {
+                    if (parse_canonical_id(info.model_name) ||
+                        claimed.contains(canonical_id(ModelSource::Registered, info.model_name))) {
+                        LOG(WARNING, "ModelManager") << "Declared model '" << info.model_name
+                                                     << "' takes a reserved or registered name; skipping."
+                                                     << std::endl;
+                        continue;
+                    }
+                    offered.push_back(std::move(info));
+                }
+                return offered;
+            },
+            [](const std::string& name) {
+                LOG(WARNING, "ModelManager") << "Declared model '" << name
+                                             << "' conflicts with a model already listed; skipping." << std::endl;
             }));
     }
 

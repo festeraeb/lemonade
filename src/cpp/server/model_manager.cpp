@@ -652,6 +652,16 @@ models::CatalogSetDeps ModelManager::make_catalog_deps(
     deps.list_cloud_models = [this](const std::string& provider) {
         return backends::CloudServer::discover_provider_models(*cloud_registry_, provider);
     };
+    deps.declared_models = [] {
+        std::vector<ModelInfo> declared;
+        for (const auto* desc : backends::all_descriptors()) {
+            if (desc->dynamic_models) continue;
+            for (auto& info : backends::ops_for(desc->recipe)->declared_models()) {
+                declared.push_back(std::move(info));
+            }
+        }
+        return declared;
+    };
     return deps;
 }
 

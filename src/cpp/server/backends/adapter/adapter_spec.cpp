@@ -671,6 +671,87 @@ DeviceValues device_values(const std::string& requested, const std::string& spec
     return DeviceValues{device, gpu_uuids};
 }
 
+namespace {
+
+bool valid_model_name(const std::string& name) {
+    if (name.empty() || name.size() > 128 || !std::isalnum(static_cast<unsigned char>(name[0]))) return false;
+    for (char c : name) {
+        if (!(std::isalnum(static_cast<unsigned char>(c)) || c == '-' || c == '_' || c == '.')) return false;
+    }
+    for (const char* prefix : {"user.", "extra.", "builtin."}) {
+        if (name.rfind(prefix, 0) == 0) return false;
+    }
+    return true;
+}
+
+bool absolute_path(const std::string& p) {
+    if (!p.empty() && (p[0] == '/' || p[0] == '\\')) return true;
+    return p.size() >= 3 && std::isalpha(static_cast<unsigned char>(p[0])) && p[1] == ':' &&
+           (p[2] == '/' || p[2] == '\\');
+}
+
+}  // namespace
+
+DeclaredModels declared_models(const json& spec, const std::string& spec_name, const std::string& spec_dir) {
+    DeclaredModels out;
+    if (!spec.is_object() || !spec.contains("models")) return out;
+    const std::string where = "adapter spec '" + spec_name + "': ";
+    const json& models = spec["models"];
+    if (!models.is_array()) {
+        out.skipped.push_back(where + "models: not an array");
+        return out;
+    }
+    std::unordered_set<std::string> seen;
+    for (size_t i = 0; i < models.size(); ++i) {
+        const json& entry = models[i];
+        const std::string field = "models[" + std::to_string(i) + "]";
+        if (!entry.is_object()) {
+            out.skipped.push_back(where + field + ": not an object");
+            continue;
+        }
+        DeclaredModel m;
+        if (!entry.contains("name") || !entry["name"].is_string() ||
+            !valid_model_name(entry["name"].get<std::string>())) {
+            out.skipped.push_back(where + field + ".name: missing or not a valid model name");
+            continue;
+        }
+        m.name = entry["name"].get<std::string>();
+        if (!entry.contains("path") || !entry["path"].is_string() || entry["path"].get<std::string>().empty()) {
+            out.skipped.push_back(where + field + ".path: missing or not a string");
+            continue;
+        }
+        m.path = entry["path"].get<std::string>();
+        if (!absolute_path(m.path)) m.path = spec_dir + "/" + m.path;
+        if (entry.contains("labels")) {
+            const json& labels = entry["labels"];
+            bool ok = labels.is_array();
+            if (ok) {
+                for (const auto& l : labels) {
+                    if (!l.is_string()) ok = false;
+                    else m.labels.push_back(l.get<std::string>());
+                }
+            }
+            if (!ok) {
+                out.skipped.push_back(where + field + ".labels: not an array of strings");
+                continue;
+            }
+        }
+        if (entry.contains("ctx")) {
+            if (!entry["ctx"].is_number_integer() || entry["ctx"].get<int64_t>() <= 0) {
+                out.skipped.push_back(where + field + ".ctx: not a positive integer");
+                continue;
+            }
+            m.ctx = entry["ctx"].get<int64_t>();
+        }
+        if (!seen.insert(m.name).second) {
+            out.skipped.push_back(where + field + ".name: '" + m.name + "' repeats an earlier entry");
+            continue;
+        }
+        out.models.push_back(std::move(m));
+    }
+    return out;
+}
+
 }  // namespace specs
 }  // namespace adapter
 }  // namespace backends

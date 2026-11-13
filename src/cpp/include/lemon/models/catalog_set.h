@@ -36,6 +36,7 @@ struct CatalogSetDeps {
     std::function<std::vector<ModelInfo>(const std::string& recipe)> discover_backend;
     std::function<std::vector<std::string>()> cloud_providers;
     std::function<std::vector<ModelInfo>(const std::string& provider)> list_cloud_models;
+    std::function<std::vector<ModelInfo>()> declared_models;
 };
 
 // The catalogs the shipped product builds from.

@@ -9,6 +9,7 @@ It was built against Lemonade 2026.45 and 2026.46 and rebased onto `main`. It is
 - [Environment allowlist](#environment-allowlist)
 - [Device selection](#device-selection)
 - [Readiness](#readiness)
+- [Models declared by the spec](#models-declared-by-the-spec)
 - [Conformance levels](#conformance-levels)
 - [Running the checks](#running-the-checks)
 - [What the plane needs from lemond](#what-the-plane-needs-from-lemond)
@@ -59,6 +60,7 @@ A spec is `<name>.json` in `<config dir>/adapters/` (or `$LEMONADE_ADAPTERS_DIR`
 | `ready` | Readiness probe, see [Readiness](#readiness). |
 | `identity.owned_by` | When set, `/v1/models` must report this owner or the engine is stopped. |
 | `telemetry_path`, `memory_path`, `budget_path` | Engine routes for statistics, the memory report and the budget request. |
+| `models` | Models the spec offers without a registration, see [Models declared by the spec](#models-declared-by-the-spec). |
 | `telemetry` | `{enabled, env, what}`: extra environment applied only when `enabled` is true or the user sets `adapter_telemetry=on`. Off by default. |
 
 Unknown fields are ignored. A missing or wrong-typed required field makes `check_spec` cap the adapter at level 0 and `load` refuses with a message that names the problem.
@@ -105,6 +107,24 @@ After the process starts, lemond's existing `ready.path` check runs. If `ready.j
 
 `load()` does not call `ready_state()` yet; it uses the `ready_values` / `error_values` loop above. The classifier is tested and ready to be wired in once there is somewhere to show Loading and progress.
 
+## Models declared by the spec
+
+A spec may list the models it serves. lemond offers them at startup with recipe `adapter` and checkpoint `"<spec>::<path>"`, so nobody edits `user_models.json`.
+
+```json
+"models": [
+  {"name": "qwen3-0.6b", "path": "models/Qwen3-0.6B-Q4_0.gguf", "labels": ["chat"], "ctx": 4096}
+]
+```
+
+- `name` and `path` are required. A relative `path` is read from the spec folder.
+- `labels` is optional and defaults to `["chat"]`. `ctx` is optional and becomes the model's context window.
+- A model whose file is missing is listed as not downloaded, as a registration with a missing file is.
+- A malformed entry is skipped with a log line that names the spec and the field. A spec that is not valid JSON costs only its own models.
+- A declared name never replaces a built-in model or a registration with the same name; it is skipped with a log line. Names may not start with `user.`, `extra.` or `builtin.`.
+
+The models come from a catalog source, `backend_declared`, listed after registrations. It asks each backend's `BackendOps::declared_models()`; only the adapter answers.
+
 ## Conformance levels
 
 `tools/adapter_conformance.py` grades one adapter against a running lemond and reports the highest level it earns. Failing a level is a downgrade, not a removal: level 0 needs no test because the engine can always be run without control, for example as a provider.
@@ -126,7 +146,7 @@ L4 cannot pass on a stock `lemond` today, for the reason in the next section.
 All commands run from the repository root. `BUILD_DIR` names a configured build; the unit tests take the `nlohmann/json` header from its `_deps` folder (or set `JSON_INCLUDE`).
 
 ```bash
-# Unit tests for the pure spec module, one job at a time (ap2 ap3 ap4 ap5 ap6 ap7 ap8 ap10 ap11)
+# Unit tests for the pure spec module, one job at a time (ap2 ap3 ap4 ap5 ap6 ap7 ap8 ap10 ap11 ap12 ap13)
 BUILD_DIR=build bash test/cpp/adapter_spec/run.sh ap2
 
 # Conformance tool unit tests
@@ -135,6 +155,9 @@ python3 -m unittest test/test_adapter_conformance_gpu.py test/test_adapter_confo
 # Live test: builds a throwaway tree, starts the given lemond on ADAPTER_LIVE_PORT (default 13807)
 # and loads a recording fake engine
 ADAPTER_LIVE_PORT=14300 python3 test/cpp/adapter_spec/live/spec_wiring_live.py build/lemond
+
+# Live tests for the optional hooks, each with its own throwaway tree and the fixture engine
+python3 test/cpp/adapter_spec/live/declared_models_live.py build/lemond
 
 # Do the Lemonade declarations the backend depends on still match?
 python3 tools/adapter_hook_map.py --check
@@ -171,6 +194,7 @@ R1 to R17 are the requests we drew up while building the plane. The plane works 
 | R15 | Greedy reference check in conformance | Detect broken build or quantisation | `reference_check()` with tests; not in the L1 to L4 run | In the plane |
 | R16 | Versioned spec, unknown fields ignored, missing required fields give L0 | Specs outlive daemon versions | `check_spec()` | In the plane |
 | R17 | Hook map with fingerprints and a CI check | Tells the author what moved | `hook_map.json`, `adapter_hook_map.py`, `adapter_hook_check.py` | In the plane |
+| R18 | Models declared by the spec | An engine ships with the models it serves | Each model had to be registered in `user_models.json` | Optional hook: a `backend_declared` catalog source and `BackendOps::declared_models()` |
 
 `cesarops/adapter-hooks` also fills `{ctx}` (the recipe's `ctx_size`, else the model's registered window) and reports `device` as `cpu` for a spec that selects no GPU.
 

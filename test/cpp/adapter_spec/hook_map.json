@@ -402,6 +402,36 @@
    "status": "unchanged",
    "matches_old": 1,
    "matches_new": 1
+  },
+  {
+   "file": "src/cpp/include/lemon/backends/backend_ops.h",
+   "symbol": "BackendOps::declared_models",
+   "pattern": "^\\s*virtual std::vector<ModelInfo> declared_models\\(",
+   "signature": "virtual std::vector<ModelInfo> declared_models() const {",
+   "role": "AdapterOps::declared_models offers each installed spec's models array",
+   "status": "new",
+   "matches_old": 0,
+   "matches_new": 1
+  },
+  {
+   "file": "src/cpp/include/lemon/backends/backend_ops.h",
+   "symbol": "BackendOps::populate_metadata",
+   "pattern": "^\\s*virtual void populate_metadata\\(",
+   "signature": "virtual void populate_metadata(ModelInfo& info, const BackendOpsContext& ctx) const {",
+   "role": "AdapterOps::populate_metadata sets max_context_window from a declared ctx",
+   "status": "new",
+   "matches_old": 0,
+   "matches_new": 1
+  },
+  {
+   "file": "src/cpp/include/lemon/models/model_info.h",
+   "symbol": "ModelInfo::extra",
+   "pattern": "^\\s*T extra\\(const std::string& key",
+   "signature": "T extra(const std::string& key, const T& fallback) const {",
+   "role": "the declared ctx travels as extras[\"adapter_ctx\"]",
+   "status": "new",
+   "matches_old": 0,
+   "matches_new": 1
   }
  ]
 }
