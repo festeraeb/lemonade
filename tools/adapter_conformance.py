@@ -251,7 +251,10 @@ def telemetry_verdict(stats, model):
         )
     entry = engines.get(model)
     if entry is None:
-        entry = next((v for k, v in engines.items() if k.endswith("." + model)), None)
+        entry = next(
+            (v for k, v in engines.items() if k.endswith("." + model) or model.endswith("." + k)),
+            None,
+        )
     if entry is None:
         return False, (
             f"engine_telemetry has no entry for {model}: the engine reported nothing "
