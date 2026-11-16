@@ -189,6 +189,20 @@ public:
         return true;
     }
 
+    // Non-blocking pin for short side calls (telemetry). Takes a reference only when the model is READY
+    // or IN_USE, so it never waits out a load, restores a downsized model or rescues an eviction.
+    // A true result must be matched by release_inference().
+    bool try_pin_ready() {
+        std::lock_guard<std::mutex> lock(state_mutex_);
+        if (maintenance_in_progress_ || (state_ != ModelState::READY && state_ != ModelState::IN_USE)) {
+            return false;
+        }
+        active_request_count_++;
+        state_ = ModelState::IN_USE;
+        state_cv_.notify_all();
+        return true;
+    }
+
     // Called by the eviction engine (under the router lock) to atomically decide
     // whether a model marked EVICTING may actually be unloaded. Returns true only
     // if the model is still idle and EVICTING (commit -> transition to UNLOADED so

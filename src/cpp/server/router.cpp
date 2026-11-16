@@ -2500,6 +2500,65 @@ json Router::get_stats() const {
     return stats;
 }
 
+json Router::collect_engine_telemetry(std::chrono::milliseconds budget) const {
+    // The worker owns the pin: it releases it when the call returns, even if /stats stopped waiting.
+    struct Call {
+        std::mutex m;
+        std::condition_variable cv;
+        bool done = false;
+        std::map<std::string, json> data;
+        std::string error;
+    };
+    std::vector<std::pair<std::string, std::shared_ptr<Call>>> calls;
+    {
+        std::lock_guard<std::mutex> lock(load_mutex_);
+        for (const auto& owned : loaded_servers_) {
+            WrappedServer* server = owned.get();
+            if (!server || !server->is_backend_alive() || !server->try_pin_ready()) continue;
+            auto call = std::make_shared<Call>();
+            calls.emplace_back(model_manager_->get_public_model_name(server->get_model_name()), call);
+            try {
+                std::thread([server, call] {
+                    std::map<std::string, json> data;
+                    std::string error;
+                    try {
+                        data = server->get_additional_telemetry();
+                    } catch (const std::exception& e) {
+                        error = e.what();
+                    } catch (...) {
+                        error = "unknown error";
+                    }
+                    server->release_inference();
+                    std::lock_guard<std::mutex> g(call->m);
+                    call->data = std::move(data);
+                    call->error = std::move(error);
+                    call->done = true;
+                    call->cv.notify_all();
+                }).detach();
+            } catch (...) {
+                server->release_inference();
+                calls.pop_back();
+            }
+        }
+    }  // load_mutex_ released before any wait
+
+    json out = json::object();
+    const auto deadline = std::chrono::steady_clock::now() + budget;
+    for (auto& [model, call] : calls) {
+        std::unique_lock<std::mutex> lock(call->m);
+        if (!call->cv.wait_until(lock, deadline, [&] { return call->done; })) {
+            out[model] = {{"error", "telemetry timed out"}};
+        } else if (!call->error.empty()) {
+            out[model] = {{"error", call->error}};
+        } else if (!call->data.empty()) {
+            json entry = json::object();
+            for (auto& [key, value] : call->data) entry[key] = std::move(value);
+            out[model] = std::move(entry);
+        }
+    }
+    return out;
+}
+
 json Router::get_metrics_snapshot() const {
     json result;
     result["loaded_models"] = json::array();

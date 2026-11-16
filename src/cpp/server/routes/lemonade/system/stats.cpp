@@ -71,6 +71,9 @@ public:
 
         try {
             auto stats = ctx_.router->get_stats();
+            // Engine-reported data (the adapter's memory and metrics objects); left out when no engine reports.
+            auto engines = ctx_.router->collect_engine_telemetry();
+            if (!engines.empty()) stats["engine_telemetry"] = std::move(engines);
             res.set_content(stats.dump(), "application/json");
         } catch (const std::exception& e) {
             LOG(ERROR, "Server") << "ERROR in handle_stats: " << e.what() << std::endl;
