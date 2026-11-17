@@ -73,13 +73,14 @@ There is no shell: the argv array is passed to the process directly.
 | `{model}`, `{model_path}` | The path after `::` in the checkpoint. |
 | `{device}` | Index of the selected card, as decimal text. |
 | `{gpu_uuids}` | UUID of the selected card; the index text when the card has none. |
+| `{ctx}` | Context size for this load: the recipe's `ctx_size`, else the model's registered window. |
 | `{spec_dir}` | Folder holding the spec. |
 
-A `{name}` token not in this set is an error that names it. `{ctx}` is accepted by the argv builder but `load()` does not supply a value for it yet, so a spec that uses it is refused today; write the context size into `args`. Braces that are not a `{identifier}` token, such as `"{}"`, stay as text.
+A `{name}` token not in this set is an error that names it. When lemond knows no context size for the load, `{ctx}` stays unsupplied and a spec that uses it is refused with that message. Placeholders are filled in `env` values as well as in `args`. Braces that are not a `{identifier}` token, such as `"{}"`, stay as text.
 
 ## Environment allowlist
 
-A spec starts a process as the lemond user, so `env` is limited to names starting with `CUDA_`, `HIP_`, `ROCR_`, `HSA_`, `GGML_`, `LLAMA_`, `OMP_`, `MKL_`, `VK_`, `NAUTIBURN_`, `STRATA_` or `LEMONADE_ENGINE_`, plus `LD_LIBRARY_PATH` and `TZ`. Anything else, including `LD_PRELOAD` and `PATH`, is refused with the variable named.
+A spec starts a process as the lemond user, so `env` is limited to names starting with `CUDA_`, `HIP_`, `ROCR_`, `HSA_`, `GGML_`, `LLAMA_`, `OMP_`, `MKL_`, `VK_`, `NAUTIBURN_`, `STRATA_`, `LB_` or `LEMONADE_ENGINE_`, plus `LD_LIBRARY_PATH` and `TZ`. Anything else, including `LD_PRELOAD` and `PATH`, is refused with the variable named.
 
 `LD_LIBRARY_PATH` entries must be absolute, contain no `..`, and lie inside the spec folder, the binary's folder, or, when the binary is in a `bin/` folder, that engine bundle's root. The refused entry is named.
 

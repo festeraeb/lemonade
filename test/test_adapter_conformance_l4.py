@@ -26,6 +26,16 @@ class TelemetryVerdict(unittest.TestCase):
         stats = {"engine_telemetry": {"user.m": {"adapter_stats": {}}}}
         self.assertTrue(ac.telemetry_verdict(stats, "m")[0])
 
+    def test_prefixed_model_matches_bare_key(self):
+        # --model user.m while engine_telemetry reports the bare name (63d635124)
+        stats = {"engine_telemetry": {"m": {"adapter_stats": {}}}}
+        self.assertTrue(ac.telemetry_verdict(stats, "user.m")[0])
+
+    def test_suffix_match_needs_a_dot(self):
+        # "user.mm" must not take the entry of "m", nor "xm" the entry of "user.m"
+        self.assertFalse(ac.telemetry_verdict({"engine_telemetry": {"m": {"adapter_stats": {}}}}, "user.mm")[0])
+        self.assertFalse(ac.telemetry_verdict({"engine_telemetry": {"user.m": {"adapter_stats": {}}}}, "xm")[0])
+
     def test_no_hook_names_the_hook(self):
         ok, why = ac.telemetry_verdict({"requests": 1}, "m")
         self.assertFalse(ok)
